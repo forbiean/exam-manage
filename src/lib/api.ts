@@ -19,18 +19,29 @@ export async function login(payload: LoginPayload) {
   });
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({ message: "登录失败" }));
+    const err = (await response
+      .json()
+      .catch(() => ({ message: "登录失败" }))) as { message?: string };
     throw new Error(err.message || "登录失败");
   }
 
-  return response.json() as Promise<{
-    token: string;
-    user: {
-      id: string;
-      email: string;
-      name: string;
-      role: "student" | "admin";
-    };
-  }>;
+  const body = (await response.json()) as LoginResponseWrapper;
+
+  return body.data;
 }
 
+type LoginResponseData = {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: "student" | "admin";
+  };
+};
+
+type LoginResponseWrapper = {
+  success: boolean;
+  message: string;
+  data: LoginResponseData;
+};
