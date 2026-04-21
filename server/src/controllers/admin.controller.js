@@ -9,6 +9,13 @@ const {
   getAllExamsForAdmin,
 } = require("../services/exam.service");
 const { getAllSubmissionRecords } = require("../services/submission.service");
+const {
+  listStudents: listStudentsService,
+  createStudent: createStudentService,
+  updateStudent: updateStudentService,
+  deleteStudent: deleteStudentService,
+  importStudentsFromCsv: importStudentsFromCsvService,
+} = require("../services/studentAdmin.service");
 const { ok } = require("../utils/response");
 
 function listQuestions(req, res, next) {
@@ -71,6 +78,56 @@ function listSubmissions(req, res, next) {
   }
 }
 
+async function listStudents(req, res, next) {
+  try {
+    const data = await listStudentsService({
+      search: req.query.search || "",
+      page: req.query.page || 1,
+      pageSize: req.query.pageSize || 20,
+    });
+    return ok(res, data, "获取学生列表成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function createStudent(req, res, next) {
+  try {
+    const student = await createStudentService(req.body || {});
+    return ok(res, student, "创建学生成功", 201);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function updateStudent(req, res, next) {
+  try {
+    const student = await updateStudentService(req.params.studentId, req.body || {});
+    return ok(res, student, "更新学生成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function deleteStudent(req, res, next) {
+  try {
+    const result = await deleteStudentService(req.params.studentId);
+    return ok(res, result, "删除学生成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function importStudentsFromCsv(req, res, next) {
+  try {
+    const { fileName, csvText, overwrite } = req.body || {};
+    const result = await importStudentsFromCsvService({ fileName, csvText, overwrite });
+    return ok(res, result, "批量导入执行完成");
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   listQuestions,
   createQuestion,
@@ -79,5 +136,9 @@ module.exports = {
   createExam,
   publishOneExam,
   listSubmissions,
+  listStudents,
+  createStudent,
+  updateStudent,
+  deleteStudent,
+  importStudentsFromCsv,
 };
-

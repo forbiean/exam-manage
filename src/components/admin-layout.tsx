@@ -15,6 +15,7 @@ import {
   Database,
   ClipboardList,
   BarChart3,
+  Users,
   Menu,
   ChevronRight,
   LogOut,
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/admin", label: "概览", icon: LayoutDashboard },
   { href: "/admin/exams", label: "考试管理", icon: FileText },
   { href: "/admin/questions", label: "题库管理", icon: Database },
+  { href: "/admin/students", label: "学生管理", icon: Users },
   { href: "/admin/submissions", label: "提交记录", icon: ClipboardList },
   { href: "/admin/scores", label: "成绩统计", icon: BarChart3 },
 ];
