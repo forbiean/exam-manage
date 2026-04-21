@@ -2,30 +2,55 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { BookOpen, GraduationCap, ShieldCheck } from "lucide-react";
+import { login } from "@/lib/api";
+import { saveAuthStorage } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [role, setRole] = useState<"student" | "admin">("student");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Mock login delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    setLoading(false);
-    if (role === "admin") {
-      router.push("/admin");
-    } else {
-      router.push("/student/exams");
+    setError("");
+
+    try {
+      const data = await login({ email, password });
+
+      if (data.user.role !== role) {
+        setError("选择的身份与账号角色不一致，请重新选择。");
+        setLoading(false);
+        return;
+      }
+
+      saveAuthStorage({
+        token: data.token,
+        user: data.user,
+      });
+
+      const redirect = searchParams.get("redirect");
+      if (redirect) {
+        router.push(redirect);
+      } else if (data.user.role === "admin") {
+        router.push("/admin");
+      } else {
+        router.push("/student/exams");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "登录失败，请稍后重试");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -110,6 +135,7 @@ export default function LoginPage() {
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "登录中..." : "登录"}
                 </Button>
+                {error ? <p className="text-sm text-destructive">{error}</p> : null}
               </form>
 
               <div className="mt-6 text-center text-sm text-muted-foreground">

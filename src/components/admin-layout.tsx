@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { clearAuthStorage, getAuthStorage } from "@/lib/auth";
 import {
   BookOpen,
   LayoutDashboard,
@@ -29,6 +30,13 @@ const navItems = [
 
 function SidebarContent() {
   const pathname = usePathname();
+  const router = useRouter();
+  const auth = getAuthStorage();
+
+  const handleLogout = () => {
+    clearAuthStorage();
+    router.push("/login");
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -72,13 +80,11 @@ function SidebarContent() {
           </Avatar>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">管理员</p>
-            <p className="text-xs text-muted-foreground truncate">admin@example.com</p>
+            <p className="text-xs text-muted-foreground truncate">{auth?.user.email ?? "admin@example.com"}</p>
           </div>
-          <Link href="/">
-            <Button variant="ghost" size="icon" className="shrink-0">
-              <LogOut className="w-4 h-4" />
-            </Button>
-          </Link>
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={handleLogout}>
+            <LogOut className="w-4 h-4" />
+          </Button>
         </div>
       </div>
     </div>
