@@ -1,19 +1,21 @@
 const express = require("express");
 const { authenticateToken } = require("../middlewares/authenticateToken");
 const { requireRole } = require("../middlewares/requireRole");
+const {
+  listPublishedExams,
+  startOneExam,
+  submitOneExam,
+  myHistory,
+} = require("../controllers/student.controller");
 
 const router = express.Router();
 
 router.use(authenticateToken);
 router.use(requireRole("student"));
 
-router.get("/profile", (req, res) => {
-  return res.json({
-    message: "学生接口访问成功",
-    role: req.user.role,
-    email: req.user.email,
-  });
-});
+router.get("/exams", listPublishedExams);
+router.post("/exams/:examId/start", startOneExam);
+router.post("/submissions/:submissionId/submit", submitOneExam);
+router.get("/history", myHistory);
 
 module.exports = router;
-
