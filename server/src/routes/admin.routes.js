@@ -14,6 +14,7 @@ const {
   deleteExam,
   listSubmissions,
   getSubmissionDetail,
+  reviewSubmission,
   listStudents,
   createStudent,
   updateStudent,
@@ -40,6 +41,7 @@ router.delete("/exams/:examId", deleteExam);
 
 router.get("/submissions", listSubmissions);
 router.get("/submissions/:submissionId", getSubmissionDetail);
+router.patch("/submissions/:submissionId/review", reviewSubmission);
 router.get("/students", listStudents);
 router.post("/students", createStudent);
 router.patch("/students/:studentId", updateStudent);

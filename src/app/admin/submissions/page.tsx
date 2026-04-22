@@ -5,6 +5,7 @@ import { AdminLayout } from "@/components/admin-layout";
 import {
   getAdminSubmissions,
   getAdminSubmissionDetail,
+  reviewAdminSubmission,
   type AdminSubmissionDetail,
 } from "@/lib/admin-submissions-api";
 import type { SubmissionRecord } from "@/lib/student-api";
@@ -69,6 +70,8 @@ export default function AdminSubmissionsPage() {
   const [selectedSubmission, setSelectedSubmission] = useState<AdminSubmissionDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [reviewScoreInput, setReviewScoreInput] = useState("");
+  const [reviewSaving, setReviewSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +109,7 @@ export default function AdminSubmissionsPage() {
   async function handleViewDetail(submissionId: string) {
     setDetailLoading(true);
     setDetailOpen(true);
+    setReviewScoreInput("");
     try {
       const detail = await getAdminSubmissionDetail(submissionId);
       setSelectedSubmission(detail);
@@ -115,6 +119,67 @@ export default function AdminSubmissionsPage() {
       setDetailOpen(false);
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  const maxEssayScore = useMemo(() => {
+    if (!selectedSubmission) return 0;
+    return selectedSubmission.answers
+      .filter((item) => item.type === "essay")
+      .reduce((sum, item) => sum + Number(item.questionScore || 0), 0);
+  }, [selectedSubmission]);
+
+  const reviewValidation = useMemo(() => {
+    if (!selectedSubmission || selectedSubmission.status !== "submitted") {
+      return { valid: false, message: "", parsed: null as number | null };
+    }
+    if (reviewScoreInput.trim() === "") {
+      return { valid: false, message: "简答题得分不能为空", parsed: null as number | null };
+    }
+    if (!/^\d+$/.test(reviewScoreInput.trim())) {
+      return { valid: false, message: "简答题得分必须是整数", parsed: null as number | null };
+    }
+    const parsed = Number(reviewScoreInput.trim());
+    if (parsed < 0) {
+      return { valid: false, message: "简答题得分不能小于 0", parsed: null as number | null };
+    }
+    if (parsed > maxEssayScore) {
+      return {
+        valid: false,
+        message: `简答题得分不能超过 ${maxEssayScore}`,
+        parsed: null as number | null,
+      };
+    }
+    return { valid: true, message: "", parsed };
+  }, [maxEssayScore, reviewScoreInput, selectedSubmission]);
+
+  async function handleSaveReview() {
+    if (!selectedSubmission || selectedSubmission.status !== "submitted") return;
+    if (!reviewValidation.valid || reviewValidation.parsed === null) return;
+
+    setReviewSaving(true);
+    try {
+      const result = await reviewAdminSubmission(selectedSubmission.id, reviewValidation.parsed);
+      const updatedDetail = await getAdminSubmissionDetail(selectedSubmission.id);
+      setSelectedSubmission(updatedDetail);
+      setSubmissions((prev) =>
+        prev.map((item) =>
+          item.id === selectedSubmission.id
+            ? {
+                ...item,
+                status: "reviewed",
+                totalScore: result.totalScore,
+                submittedAt: result.submittedAt,
+                reviewedAt: result.reviewedAt,
+              }
+            : item
+        )
+      );
+      setReviewScoreInput("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存评阅失败");
+    } finally {
+      setReviewSaving(false);
     }
   }
 
@@ -373,11 +438,39 @@ export default function AdminSubmissionsPage() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>简答题得分</Label>
-                        <Input type="number" placeholder="输入得分" />
+                        <Input
+                          type="number"
+                          min={0}
+                          max={maxEssayScore}
+                          step={1}
+                          placeholder="输入得分"
+                          value={reviewScoreInput}
+                          onChange={(e) => setReviewScoreInput(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">范围：0 ~ {maxEssayScore}</p>
+                        {reviewScoreInput.trim() !== "" && !reviewValidation.valid && (
+                          <p className="text-xs text-destructive">{reviewValidation.message}</p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label>总分</Label>
-                        <Input type="number" placeholder="自动计算" disabled />
+                        <Input
+                          type="number"
+                          placeholder="自动计算"
+                          disabled
+                          value={
+                            reviewValidation.valid && reviewValidation.parsed !== null
+                              ? String(
+                                  Number(
+                                    selectedSubmission.answers.reduce(
+                                      (sum, item) => sum + Number(item.autoScore || 0),
+                                      0
+                                    ) + reviewValidation.parsed
+                                  )
+                                )
+                              : ""
+                          }
+                        />
                       </div>
                     </div>
                   </div>
@@ -389,7 +482,12 @@ export default function AdminSubmissionsPage() {
                   关闭
                 </Button>
                 {selectedSubmission.status === "submitted" && (
-                  <Button onClick={() => setDetailOpen(false)}>保存评阅</Button>
+                  <Button
+                    onClick={handleSaveReview}
+                    disabled={!reviewValidation.valid || reviewSaving}
+                  >
+                    {reviewSaving ? "保存中..." : "保存评阅"}
+                  </Button>
                 )}
               </DialogFooter>
             </>

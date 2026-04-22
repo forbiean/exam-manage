@@ -15,6 +15,7 @@ const {
 const {
   getAllSubmissionRecords,
   getSubmissionDetailForAdmin,
+  reviewSubmissionByAdmin,
 } = require("../services/submission.service");
 const {
   listStudents: listStudentsService,
@@ -146,6 +147,19 @@ async function getSubmissionDetail(req, res, next) {
   }
 }
 
+async function reviewSubmission(req, res, next) {
+  try {
+    const result = await reviewSubmissionByAdmin({
+      submissionId: req.params.submissionId,
+      adminUserId: req.user?.sub || null,
+      essayScore: req.body?.essayScore,
+    });
+    return ok(res, result, "保存评阅成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function listStudents(req, res, next) {
   try {
     const data = await listStudentsService({
@@ -209,6 +223,7 @@ module.exports = {
   deleteExam,
   listSubmissions,
   getSubmissionDetail,
+  reviewSubmission,
   listStudents,
   createStudent,
   updateStudent,

@@ -414,10 +414,93 @@ async function getSubmissionDetailForAdmin(submissionId) {
   };
 }
 
+async function reviewSubmissionByAdmin({ submissionId, adminUserId, essayScore }) {
+  if (essayScore === null || essayScore === undefined || essayScore === "") {
+    throw new AppError(400, "简答题得分不能为空");
+  }
+  const parsedScore = Number(essayScore);
+  if (!Number.isInteger(parsedScore) || parsedScore < 0) {
+    throw new AppError(400, "简答题得分必须是大于等于 0 的整数");
+  }
+
+  const detail = await getSubmissionDetailForAdmin(submissionId);
+  if (detail.status !== "submitted") {
+    throw new AppError(400, "仅待复核状态可保存评阅");
+  }
+
+  const essayAnswers = detail.answers.filter((item) => item.type === "essay");
+  const maxEssayScore = essayAnswers.reduce((sum, item) => sum + Number(item.questionScore || 0), 0);
+  if (parsedScore > maxEssayScore) {
+    throw new AppError(400, `简答题得分不能超过 ${maxEssayScore}`);
+  }
+
+  const nowIso = new Date().toISOString();
+  let remaining = parsedScore;
+
+  for (const answer of essayAnswers) {
+    const scoreCap = Number(answer.questionScore || 0);
+    const manualScore = Math.min(remaining, scoreCap);
+    remaining -= manualScore;
+
+    await supabaseRequest({
+      method: "PATCH",
+      path: "/rest/v1/submission_answers",
+      searchParams: {
+        submission_id: `eq.${submissionId}`,
+        question_id: `eq.${answer.questionId}`,
+      },
+      body: {
+        manual_score: manualScore,
+        review_status: "reviewed",
+        reviewed_by: adminUserId || null,
+        reviewed_at: nowIso,
+      },
+    });
+  }
+
+  const totalScore = Number(detail.answers.reduce((sum, item) => sum + Number(item.autoScore || 0), 0)) + parsedScore;
+  const updatedRows = await supabaseRequest({
+    method: "PATCH",
+    path: "/rest/v1/submissions",
+    searchParams: {
+      id: `eq.${submissionId}`,
+    },
+    headers: { Prefer: "return=representation" },
+    body: {
+      status: "reviewed",
+      manual_score: parsedScore,
+      total_score: totalScore,
+      needs_manual_review: false,
+      reviewed_at: nowIso,
+      reviewed_by: adminUserId || null,
+    },
+  });
+
+  if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+    throw new AppError(500, "保存评阅失败");
+  }
+
+  const updated = updatedRows[0];
+  return {
+    id: updated.id,
+    examId: updated.exam_id,
+    studentId: updated.student_id,
+    status: updated.status,
+    objectiveScore: Number(updated.objective_score || 0),
+    manualScore: Number(updated.manual_score || 0),
+    totalScore: Number(updated.total_score || 0),
+    maxScore: Number(updated.max_score || 0),
+    needsManualReview: Boolean(updated.needs_manual_review),
+    submittedAt: updated.submitted_at,
+    reviewedAt: updated.reviewed_at,
+  };
+}
+
 module.exports = {
   startExam,
   submitExam,
   getStudentHistory,
   getAllSubmissionRecords,
   getSubmissionDetailForAdmin,
+  reviewSubmissionByAdmin,
 };

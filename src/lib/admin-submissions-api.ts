@@ -73,3 +73,22 @@ export type AdminSubmissionDetail = SubmissionRecord & {
 export async function getAdminSubmissionDetail(submissionId: string) {
   return request<AdminSubmissionDetail>(`${API_BASE_URL}/api/admin/submissions/${submissionId}`);
 }
+
+export async function reviewAdminSubmission(submissionId: string, essayScore: number) {
+  return request<{
+    id: string;
+    examId: string;
+    studentId: string;
+    status: "reviewed";
+    objectiveScore: number;
+    manualScore: number;
+    totalScore: number;
+    maxScore: number;
+    needsManualReview: boolean;
+    submittedAt: string | null;
+    reviewedAt: string | null;
+  }>(`${API_BASE_URL}/api/admin/submissions/${submissionId}/review`, {
+    method: "PATCH",
+    body: JSON.stringify({ essayScore }),
+  });
+}
