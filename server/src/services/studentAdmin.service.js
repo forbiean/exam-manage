@@ -21,6 +21,10 @@ async function listStudents({ search = "", page = 1, pageSize = 20 }) {
   const safePageSize = Number(pageSize) > 0 ? Number(pageSize) : 20;
   const from = (safePage - 1) * safePageSize;
 
+  const orFilter = search
+    ? `(username.ilike.*${search}*,full_name.ilike.*${search}*,student_no.ilike.*${search}*)`
+    : undefined;
+
   const rows = await supabaseRequest({
     method: "GET",
     path: "/rest/v1/users",
@@ -28,7 +32,7 @@ async function listStudents({ search = "", page = 1, pageSize = 20 }) {
       select:
         "id,username,full_name,email,phone,student_no,is_active,must_change_password,created_at,updated_at",
       role: "eq.student",
-      or: search ? `username.ilike.*${search}*,full_name.ilike.*${search}*,student_no.ilike.*${search}*` : undefined,
+      or: orFilter,
       order: "created_at.desc",
       offset: from,
       limit: safePageSize,
@@ -41,9 +45,7 @@ async function listStudents({ search = "", page = 1, pageSize = 20 }) {
     searchParams: {
       select: "id",
       role: "eq.student",
-      ...(search
-        ? { or: `username.ilike.*${search}*,full_name.ilike.*${search}*,student_no.ilike.*${search}*` }
-        : {}),
+      ...(orFilter ? { or: orFilter } : {}),
     },
   });
 
