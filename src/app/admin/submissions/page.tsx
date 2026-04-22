@@ -219,6 +219,15 @@ export default function AdminSubmissionsPage() {
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>提交详情</DialogTitle>
+            <DialogDescription>
+              {selectedSubmission
+                ? `${selectedSubmission.studentName} - ${selectedSubmission.examTitle}`
+                : "查看学生本次考试提交的答题明细"}
+            </DialogDescription>
+          </DialogHeader>
+
           {detailLoading ? (
             <div className="py-16 text-center text-muted-foreground flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -226,12 +235,6 @@ export default function AdminSubmissionsPage() {
             </div>
           ) : selectedSubmission ? (
             <>
-              <DialogHeader>
-                <DialogTitle>提交详情</DialogTitle>
-                <DialogDescription>
-                  {selectedSubmission.studentName} - {selectedSubmission.examTitle}
-                </DialogDescription>
-              </DialogHeader>
 
               <div className="space-y-4 py-4">
                 <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
@@ -398,4 +401,3 @@ export default function AdminSubmissionsPage() {
     </AdminLayout>
   );
 }
-
