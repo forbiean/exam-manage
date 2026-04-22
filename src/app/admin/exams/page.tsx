@@ -18,7 +18,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Clock, Calendar, FileText, Pencil, Trash2 } from "lucide-react";
-import { createExam, deleteExam, getExams, updateExamQuestions, type ExamRecord, type ExamStatus } from "@/lib/admin-exams-api";
+import {
+  createExam,
+  deleteExam,
+  getExams,
+  publishExam,
+  updateExamQuestions,
+  type ExamRecord,
+  type ExamStatus,
+} from "@/lib/admin-exams-api";
 import { getQuestions, type QuestionRecord } from "@/lib/admin-questions-api";
 
 type CreateExamForm = {
@@ -79,6 +87,7 @@ export default function AdminExamsPage() {
   const [editingExam, setEditingExam] = useState<ExamRecord | null>(null);
   const [editQuestionIds, setEditQuestionIds] = useState<string[]>([""]);
   const [savingQuestions, setSavingQuestions] = useState(false);
+  const [publishingExamId, setPublishingExamId] = useState<string | null>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -183,6 +192,22 @@ export default function AdminExamsPage() {
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除考试失败");
+    }
+  }
+
+  async function handlePublishExam(exam: ExamRecord) {
+    if (exam.status !== "draft") return;
+    const confirmed = window.confirm(`发布后不可撤回，是否继续发布考试？\n\n${exam.title}`);
+    if (!confirmed) return;
+
+    setPublishingExamId(exam.id);
+    try {
+      await publishExam(exam.id);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "发布考试失败");
+    } finally {
+      setPublishingExamId(null);
     }
   }
 
@@ -315,6 +340,7 @@ export default function AdminExamsPage() {
                   <tr className="border-b bg-muted/50">
                     <th className="text-left font-medium px-4 py-3">考试名称</th>
                     <th className="text-left font-medium px-4 py-3 hidden sm:table-cell">状态</th>
+                    <th className="text-left font-medium px-4 py-3 hidden sm:table-cell">是否发布</th>
                     <th className="text-left font-medium px-4 py-3 hidden md:table-cell">时间</th>
                     <th className="text-left font-medium px-4 py-3 hidden lg:table-cell">题目数</th>
                     <th className="text-right font-medium px-4 py-3">操作</th>
@@ -330,6 +356,36 @@ export default function AdminExamsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">{getStatusBadge(exam.status)}</td>
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={exam.status !== "draft"}
+                          aria-label={`发布开关-${exam.title}`}
+                          disabled={exam.status !== "draft" || publishingExamId === exam.id}
+                          onClick={() => handlePublishExam(exam)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            exam.status !== "draft" ? "bg-emerald-600" : "bg-muted"
+                          } ${
+                            exam.status === "draft" && publishingExamId !== exam.id
+                              ? "cursor-pointer"
+                              : "cursor-not-allowed opacity-70"
+                          }`}
+                          title={
+                            exam.status === "draft"
+                              ? "点击发布（不可撤回）"
+                              : exam.status === "published"
+                              ? "已发布，不可撤回"
+                              : "已关闭，默认视为已发布且不可撤回"
+                          }
+                        >
+                          <span
+                            className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                              exam.status !== "draft" ? "translate-x-5" : "translate-x-1"
+                            }`}
+                          />
+                        </button>
+                      </td>
                       <td className="px-4 py-3 hidden md:table-cell">
                         <div className="text-xs text-muted-foreground space-y-0.5">
                           <p className="flex items-center gap-1">

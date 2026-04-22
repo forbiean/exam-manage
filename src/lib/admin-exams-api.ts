@@ -92,3 +92,8 @@ export async function deleteExam(examId: string) {
   });
 }
 
+export async function publishExam(examId: string) {
+  return request<ExamRecord>(`${API_BASE_URL}/api/admin/exams/${examId}/publish`, {
+    method: "PATCH",
+  });
+}

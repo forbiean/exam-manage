@@ -132,3 +132,44 @@ SUPABASE_SERVICE_ROLE_KEY=...
 - 导入弹窗必须支持：
   - 前 5 行预览
   - 导入失败明细（有失败才显示）
+
+### 10. 题库管理（已接入 Supabase）
+
+- 管理端题库页面：`/admin/questions`
+- 前端已去掉该页面的 mock 数据，使用真实接口加载数据库题目列表。
+- 当前接口：
+  - `GET /api/admin/questions?status=active|inactive|all`
+  - `POST /api/admin/questions`
+  - `PATCH /api/admin/questions/:questionId`
+  - `PATCH /api/admin/questions/:questionId/activate`（恢复未激活题目）
+  - `DELETE /api/admin/questions/:questionId`（默认软删，`is_active=false`）
+  - `DELETE /api/admin/questions/:questionId?hard=true`（永久删除，物理删除）
+- 视图行为约束：
+  - 列表视图、分类视图仅展示 `is_active=true`
+  - 未激活视图仅展示 `is_active=false`，并允许恢复/编辑/永久删除
+
+### 11. 考试管理（已接入 Supabase）
+
+- 管理端考试页面：`/admin/exams`
+- 前端已去掉该页面的 mock 数据，使用真实接口加载数据库考试列表。
+- 当前接口：
+  - `GET /api/admin/exams`
+  - `POST /api/admin/exams`（创建考试基础信息）
+  - `PATCH /api/admin/exams/:examId/questions`（仅更新考试题目关联）
+  - `PATCH /api/admin/exams/:examId/publish`（发布考试）
+  - `DELETE /api/admin/exams/:examId`（删除考试）
+- 创建/修改约束：
+  - 创建考试弹窗可填写基础信息，并可选择状态（默认草稿）
+  - 修改考试弹窗只允许从题库选择题目，不修改基础信息
+  - 题目选择支持“增加考试题目”动态增加选择项
+- 发布约束（重要）：
+  - 草稿状态可执行发布
+  - 已发布/已关闭视为已发布，不可再切回未发布
+  - 发布操作不可逆，前端需二次确认
+- 删除约束：
+  - 删除考试只删除考试及其 `exam_questions` 关联，不删除题库 `questions` 题目数据
+
+### 12. 管理端登录态校验
+
+- `RouteGuard` 不仅检查本地 token/role，还会调用 `GET /api/auth/me` 校验会话有效性。
+- 管理端 API 遇到 `401` 时需清理本地登录态并跳转 `/login`，避免“页面可进但接口全 401”的状态不一致问题。
