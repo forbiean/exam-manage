@@ -34,6 +34,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | `/admin` | 后台概览 | 数据统计仪表盘 |
 | `/admin/exams` | 考试管理 | 创建、编辑、发布考试 |
 | `/admin/questions` | 题库管理 | 单选/判断/简答题维护 |
+| `/admin/students` | 学生管理 | 学生账号增删改查与批量导入 |
 | `/admin/submissions` | 提交记录 | 学生提交查看与人工复核 |
 | `/admin/scores` | 成绩统计 | 扩展功能，成绩分析 |
 
@@ -79,9 +80,15 @@ app/student/exams/[id]/
 └── ExamTakingClient.tsx  # 客户端组件，"use client"
 ```
 
-### 4. Mock 数据
+### 4. 数据来源（重要）
 
-所有数据来自 `src/lib/mock-data.ts`，当前未接入真实接口。新增 mock 数据时需同步更新 `generateStaticParams` 中的数据源。
+- 前端页面仍有部分模块使用 `src/lib/mock-data.ts` 做演示。
+- 登录与管理员学生管理已接入 Supabase。
+- 不要将管理员登录来源回退到 `.env` mock 账号校验。
+
+当前真实接口相关：
+- `POST /api/auth/login`：后端通过 Supabase 校验账号密码
+- `GET/POST/PATCH/DELETE /api/admin/students*`：对 Supabase `public.users` 与导入表操作
 
 ### 5. 构建缓存问题
 
@@ -102,3 +109,26 @@ npm run build
 - 图标统一使用 `lucide-react`
 - 样式使用 Tailwind CSS 工具类
 - 颜色变量使用 shadcn 主题系统（如 `bg-primary`、`text-muted-foreground`）
+
+### 8. Supabase 环境变量（后端必需）
+
+启动 Express 前必须配置：
+
+```env
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+缺失会导致后端启动失败（`Missing required environment variables`）。
+
+### 9. 学生批量导入约束
+
+- 管理端学生导入页面：`/admin/students`
+- 前端支持上传文件：`.csv/.xlsx/.xls`（不是手动粘贴文本）
+- 解析后按 CSV 头字段导入，必需表头：
+  - `username,password,fullName,studentNo`
+- 可选字段：
+  - `email,phone`
+- 导入弹窗必须支持：
+  - 前 5 行预览
+  - 导入失败明细（有失败才显示）
