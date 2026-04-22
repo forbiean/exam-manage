@@ -76,10 +76,15 @@ function normalizeCorrectAnswer(type: QuestionType, raw: string) {
   return "";
 }
 
+function normalizeCategory(category: string | null | undefined) {
+  const value = String(category ?? "").trim();
+  return value || "未分类";
+}
+
 function buildPayload(form: QuestionForm) {
   const type = form.type;
   const stem = form.stem.trim();
-  const category = form.category.trim() || "未分类";
+  const category = normalizeCategory(form.category);
   const score = Number(form.score) || 1;
   const analysis = form.analysis.trim();
 
@@ -196,7 +201,7 @@ export default function AdminQuestionsPage() {
   }, [questions, search, typeFilter]);
 
   const categories = useMemo(() => {
-    return Array.from(new Set(questions.map((q) => q.category))).sort();
+    return Array.from(new Set(questions.map((q) => normalizeCategory(q.category)))).sort();
   }, [questions]);
 
   async function handleCreate() {
@@ -515,10 +520,10 @@ export default function AdminQuestionsPage() {
           </TabsContent>
           <TabsContent value="category">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {categories.map((cat) => {
-                const count = questions.filter((q) => q.category === cat).length;
+              {categories.map((cat, idx) => {
+                const count = questions.filter((q) => normalizeCategory(q.category) === cat).length;
                 return (
-                  <Card key={cat} className="hover:shadow-sm transition-shadow">
+                  <Card key={`${cat}-${idx}`} className="hover:shadow-sm transition-shadow">
                     <CardContent className="p-5">
                       <div className="flex items-start justify-between">
                         <div>
@@ -667,4 +672,3 @@ export default function AdminQuestionsPage() {
     </AdminLayout>
   );
 }
-
