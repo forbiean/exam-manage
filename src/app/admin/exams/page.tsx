@@ -378,7 +378,7 @@ export default function AdminExamsPage() {
       </div>
 
       <Dialog open={Boolean(editingExam)} onOpenChange={(open) => !open && setEditingExam(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] max-w-2xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>修改考试题目</DialogTitle>
             <DialogDescription>
@@ -386,17 +386,17 @@ export default function AdminExamsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <div className="space-y-3 py-2 min-w-0">
             {editQuestionIds.map((questionId, idx) => (
-              <div key={`q-select-${idx}`} className="space-y-2">
+              <div key={`q-select-${idx}`} className="space-y-2 min-w-0">
                 <Label>{idx === 0 ? "从题库中选择题目" : `题目 ${idx + 1}`}</Label>
                 <Select value={questionId} onValueChange={(v) => setQuestionSelectValue(idx, v)}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full min-w-0 [&>span]:truncate">
                     <SelectValue placeholder="请选择题目" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-w-[32rem]">
                     {questions.map((q) => (
-                      <SelectItem key={q.id} value={q.id}>
+                      <SelectItem key={q.id} value={q.id} className="max-w-[32rem] truncate">
                         [{q.category}] {q.stem}
                       </SelectItem>
                     ))}
@@ -410,7 +410,7 @@ export default function AdminExamsPage() {
             </Button>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="w-full min-w-0">
             <Button variant="outline" onClick={() => setEditingExam(null)}>
               取消
             </Button>
