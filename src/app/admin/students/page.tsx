@@ -87,6 +87,17 @@ export default function AdminStudentsPage() {
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
   const [failedRows, setFailedRows] = useState<Array<{ row_no: number; error_message: string | null }>>([]);
 
+  function resetImportState() {
+    setImportFileName("");
+    setImportCsvText("");
+    setOverwriteImport(false);
+    setImportResult("");
+    setImportParsing(false);
+    setPreviewRows([]);
+    setPreviewHeaders([]);
+    setFailedRows([]);
+  }
+
   async function fetchStudents(params: { search: string; page: number }) {
     const data = await getStudents({ search: params.search, page: params.page, pageSize });
     setStudents(data.list);
@@ -216,17 +227,27 @@ export default function AdminStudentsPage() {
         csvText: importCsvText,
         overwrite: overwriteImport,
       });
-      setImportResult(
-        `导入完成：新增 ${data.summary.inserted_count}，更新 ${data.summary.updated_count}，失败 ${data.summary.failed_count}`
-      );
+
       const failed = (data.detail || [])
         .filter((item) => !item.imported)
         .map((item) => ({
           row_no: item.row_no,
           error_message: item.error_message,
         }));
-      setFailedRows(failed);
+
+      if (data.summary.failed_count > 0 || failed.length > 0) {
+        setFailedRows(failed);
+        setImportResult(
+          `导入失败：新增 ${data.summary.inserted_count}，更新 ${data.summary.updated_count}，失败 ${data.summary.failed_count}`
+        );
+        return;
+      }
+
+      setImportResult(`导入成功：新增 ${data.summary.inserted_count}，更新 ${data.summary.updated_count}`);
+      setFailedRows([]);
       await loadStudents();
+      resetImportState();
+      setImportOpen(false);
     } catch (err) {
       setImportResult(err instanceof Error ? err.message : "导入失败");
       setFailedRows([]);
@@ -285,14 +306,20 @@ export default function AdminStudentsPage() {
             <p className="text-muted-foreground mt-1">支持新增、编辑、禁用和批量导入学生账号</p>
           </div>
           <div className="flex items-center gap-2">
-            <Dialog open={importOpen} onOpenChange={setImportOpen}>
+            <Dialog
+              open={importOpen}
+              onOpenChange={(open) => {
+                setImportOpen(open);
+                if (!open) resetImportState();
+              }}
+            >
               <DialogTrigger asChild>
                 <Button variant="outline">
                   <Upload className="w-4 h-4 mr-1.5" />
                   批量导入
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-3xl">
+              <DialogContent className="w-[95vw] max-w-3xl overflow-hidden">
                 <DialogHeader>
                   <DialogTitle>批量导入学生</DialogTitle>
                   <DialogDescription>
@@ -324,14 +351,18 @@ export default function AdminStudentsPage() {
                   {importResult ? <p className="text-sm text-muted-foreground">{importResult}</p> : null}
 
                   {previewRows.length > 0 ? (
-                    <div className="space-y-2">
+                    <div className="space-y-2 min-w-0">
                       <Label>数据预览（前 5 行）</Label>
-                      <div className="rounded-md border overflow-auto max-h-52">
-                        <table className="w-full text-xs">
+                      <div className="w-full max-w-full min-w-0 rounded-md border max-h-52 overflow-y-auto overflow-x-auto">
+                        <table className="w-full table-fixed text-xs">
                           <thead>
                             <tr className="bg-muted/50 border-b">
                               {previewHeaders.map((header) => (
-                                <th key={header} className="text-left px-2 py-1.5 whitespace-nowrap">
+                                <th
+                                  key={header}
+                                  className="max-w-36 overflow-hidden text-ellipsis text-left px-2 py-1.5 whitespace-nowrap"
+                                  title={header}
+                                >
                                   {header}
                                 </th>
                               ))}
@@ -341,7 +372,11 @@ export default function AdminStudentsPage() {
                             {previewRows.map((row, index) => (
                               <tr key={index} className="border-b last:border-0">
                                 {previewHeaders.map((header) => (
-                                  <td key={`${index}-${header}`} className="px-2 py-1.5 whitespace-nowrap">
+                                  <td
+                                    key={`${index}-${header}`}
+                                    className="max-w-36 overflow-hidden text-ellipsis px-2 py-1.5 whitespace-nowrap"
+                                    title={row[header] || "-"}
+                                  >
                                     {row[header] || "-"}
                                   </td>
                                 ))}
