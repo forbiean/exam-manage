@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { getCurrentRole, getToken, type UserRole } from "@/lib/auth";
+import { clearAuthStorage, getCurrentRole, getToken, type UserRole } from "@/lib/auth";
 
 type RouteGuardProps = {
   allowedRole: UserRole;
@@ -16,6 +16,7 @@ export function RouteGuard({ allowedRole, children }: RouteGuardProps) {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
+    let isCancelled = false;
     const token = getToken();
     const role = getCurrentRole();
 
@@ -29,7 +30,40 @@ export function RouteGuard({ allowedRole, children }: RouteGuardProps) {
       return;
     }
 
-    setIsReady(true);
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!API_BASE_URL) {
+      clearAuthStorage();
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+      return;
+    }
+
+    async function validateSession() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          clearAuthStorage();
+          router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+          return;
+        }
+
+        if (!isCancelled) {
+          setIsReady(true);
+        }
+      } catch {
+        clearAuthStorage();
+        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+      }
+    }
+
+    validateSession();
+    return () => {
+      isCancelled = true;
+    };
   }, [allowedRole, pathname, router]);
 
   if (!isReady) {
@@ -45,4 +79,3 @@ export function RouteGuard({ allowedRole, children }: RouteGuardProps) {
 
   return <>{children}</>;
 }
-

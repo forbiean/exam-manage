@@ -1,4 +1,5 @@
 import { getToken } from "@/lib/auth";
+import { clearAuthStorage } from "@/lib/auth";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -40,6 +41,15 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     | ApiResponse<T>
     | { message?: string }
     | null;
+
+  if (response.status === 401) {
+    clearAuthStorage();
+    if (typeof window !== "undefined") {
+      const redirect = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.href = `/login?redirect=${redirect}`;
+    }
+    throw new Error("登录已过期，请重新登录");
+  }
 
   if (!response.ok || !body || !("success" in body) || !body.success) {
     throw new Error((body && "message" in body && body.message) || "请求失败");
@@ -115,4 +125,3 @@ export async function importStudentsCsv(payload: {
     body: JSON.stringify(payload),
   });
 }
-
