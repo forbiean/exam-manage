@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getExamById, getQuestionsByIds } from "@/lib/mock-data";
-import type { Question } from "@/lib/mock-data";
+import {
+  getStudentExamPaper,
+  startStudentExam,
+  submitStudentExam,
+  type StudentExamRecord,
+  type StudentQuestionRecord,
+} from "@/lib/student-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +64,10 @@ function QuestionTypeLabel({ type }: { type: string }) {
       );
     case "judge":
       return (
-        <Badge variant="outline" className="text-xs font-normal border-purple-200 text-purple-600 bg-purple-50">
+        <Badge
+          variant="outline"
+          className="text-xs font-normal border-purple-200 text-purple-600 bg-purple-50"
+        >
           判断题
         </Badge>
       );
@@ -76,26 +84,55 @@ function QuestionTypeLabel({ type }: { type: string }) {
 
 function useExamLoader(examId: string) {
   const [loading, setLoading] = useState(true);
-  const [exam, setExam] = useState<ReturnType<typeof getExamById>>(undefined);
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const [exam, setExam] = useState<StudentExamRecord | null>(null);
+  const [questions, setQuestions] = useState<StudentQuestionRecord[]>([]);
+  const [submissionId, setSubmissionId] = useState<string>("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    const timer = setTimeout(() => {
-      if (cancelled) return;
-      const e = getExamById(examId);
-      setExam(e);
-      setQuestions(e?.questions ? getQuestionsByIds(e.questions) : []);
-      setLoading(false);
-    }, 600);
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const paper = await getStudentExamPaper(examId);
+        if (cancelled) return;
+        setExam(paper.exam);
+        setQuestions(paper.questions);
+
+        const started = await startStudentExam(examId);
+        if (cancelled) return;
+        setSubmissionId(started.id);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "加载试卷失败");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    load();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
   }, [examId]);
 
-  return { loading, exam, questions };
+  return { loading, exam, questions, submissionId, error };
+}
+
+function computeInitialSeconds(exam: StudentExamRecord) {
+  const nowMs = Date.now();
+  if (!exam.endTime) {
+    return exam.durationMinutes * 60;
+  }
+  const endMs = new Date(exam.endTime).getTime();
+  if (Number.isNaN(endMs)) {
+    return exam.durationMinutes * 60;
+  }
+  const remainingByEnd = Math.max(0, Math.floor((endMs - nowMs) / 1000));
+  const byDuration = exam.durationMinutes * 60;
+  return Math.max(0, Math.min(byDuration, remainingByEnd));
 }
 
 export default function ExamTakingClient() {
@@ -103,7 +140,7 @@ export default function ExamTakingClient() {
   const router = useRouter();
   const examId = params.id as string;
 
-  const { loading, exam, questions } = useExamLoader(examId);
+  const { loading, exam, questions, submissionId, error } = useExamLoader(examId);
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
@@ -114,27 +151,26 @@ export default function ExamTakingClient() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const initialTimeLeft = useMemo(() => (exam ? computeInitialSeconds(exam) : 0), [exam]);
+  const effectiveTimeLeft = timeLeft > 0 ? timeLeft : initialTimeLeft;
 
   useEffect(() => {
-    if (!exam) return;
-    const totalSeconds = exam.durationMinutes * 60;
-    setTimeLeft(totalSeconds);
-  }, [exam]);
+    if (!exam || initialTimeLeft <= 0) return;
+    let leftSeconds = initialTimeLeft;
 
-  useEffect(() => {
-    if (!exam || timeLeft <= 0) return;
     const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setShowTimeUpDialog(true);
-          return 0;
-        }
-        return prev - 1;
-      });
+      leftSeconds -= 1;
+      if (leftSeconds <= 0) {
+        clearInterval(timer);
+        setTimeLeft(0);
+        setShowTimeUpDialog(true);
+        return;
+      }
+      setTimeLeft(leftSeconds);
     }, 1000);
+
     return () => clearInterval(timer);
-  }, [exam, timeLeft]);
+  }, [exam, initialTimeLeft]);
 
   const handleAnswer = useCallback((questionId: string, value: string) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
@@ -152,26 +188,45 @@ export default function ExamTakingClient() {
     });
   }, []);
 
+  const doSubmit = useCallback(async () => {
+    if (!submissionId) throw new Error("提交记录不存在，请刷新后重试");
+    const payload = questions.map((q) => ({
+      questionId: q.id,
+      answer: answers[q.id] ?? "",
+    }));
+    await submitStudentExam(submissionId, payload);
+  }, [answers, questions, submissionId]);
+
   const handleSubmit = useCallback(async () => {
     setSubmitting(true);
     setShowSubmitDialog(false);
-    await new Promise((r) => setTimeout(r, 1200));
-    setSubmitted(true);
-    setSubmitting(false);
-    setTimeout(() => {
-      router.push("/student/history");
-    }, 2000);
-  }, [router]);
+    try {
+      await doSubmit();
+      setSubmitted(true);
+      setSubmitting(false);
+      setTimeout(() => {
+        router.push("/student/history");
+      }, 1200);
+    } catch (err) {
+      setSubmitting(false);
+      alert(err instanceof Error ? err.message : "交卷失败，请重试");
+    }
+  }, [doSubmit, router]);
 
   const handleTimeUpSubmit = useCallback(async () => {
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setSubmitted(true);
-    setSubmitting(false);
-    setTimeout(() => {
-      router.push("/student/history");
-    }, 2000);
-  }, [router]);
+    try {
+      await doSubmit();
+      setSubmitted(true);
+      setSubmitting(false);
+      setTimeout(() => {
+        router.push("/student/history");
+      }, 1200);
+    } catch (err) {
+      setSubmitting(false);
+      alert(err instanceof Error ? err.message : "自动交卷失败，请重试");
+    }
+  }, [doSubmit, router]);
 
   const answeredCount = useMemo(
     () => Object.keys(answers).filter((k) => answers[k]?.trim?.()).length,
@@ -179,8 +234,8 @@ export default function ExamTakingClient() {
   );
   const totalQuestions = questions.length;
   const progressPercent = totalQuestions > 0 ? (answeredCount / totalQuestions) * 100 : 0;
-  const isTimeLow = timeLeft < 300 && timeLeft > 0;
-  const isTimeCritical = timeLeft < 60 && timeLeft > 0;
+  const isTimeLow = effectiveTimeLeft < 300 && effectiveTimeLeft > 0;
+  const isTimeCritical = effectiveTimeLeft < 60 && effectiveTimeLeft > 0;
 
   if (loading) {
     return (
@@ -194,6 +249,27 @@ export default function ExamTakingClient() {
             <p className="text-sm text-muted-foreground mt-1">请稍候，正在准备考试环境...</p>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-full flex items-center justify-center bg-background px-4">
+        <Card className="max-w-sm w-full">
+          <CardContent className="pt-10 pb-10 text-center space-y-4">
+            <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center mx-auto">
+              <AlertCircle className="w-7 h-7 text-muted-foreground" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold">试卷加载失败</h1>
+              <p className="text-sm text-muted-foreground mt-1">{error}</p>
+            </div>
+            <Button className="mt-2" onClick={() => router.push("/student/exams")}>
+              返回考试列表
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -229,11 +305,11 @@ export default function ExamTakingClient() {
             </div>
             <div>
               <h2 className="text-2xl font-bold">试卷已提交</h2>
-              <p className="text-muted-foreground mt-2">感谢您的参与，成绩将在评阅后公布</p>
+              <p className="text-muted-foreground mt-2">感谢您的参与，正在跳转历史成绩页</p>
             </div>
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              即将跳转到历史成绩页...
+              即将跳转...
             </div>
           </CardContent>
         </Card>
@@ -261,26 +337,17 @@ export default function ExamTakingClient() {
 
   return (
     <div className="min-h-full flex flex-col bg-background">
-      {/* Top Bar */}
       <header className="border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="shrink-0"
-              onClick={() => router.push("/student/exams")}
-            >
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.push("/student/exams")}>
               <ChevronLeft className="w-5 h-5" />
             </Button>
             <Separator orientation="vertical" className="h-5 hidden sm:block" />
-            <h1 className="font-semibold text-sm truncate max-w-[140px] sm:max-w-xs">
-              {exam.title}
-            </h1>
+            <h1 className="font-semibold text-sm truncate max-w-[140px] sm:max-w-xs">{exam.title}</h1>
           </div>
 
           <div className="flex items-center gap-3 sm:gap-5">
-            {/* Progress - hidden on small screens */}
             <div className="hidden sm:flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
                 已答 {answeredCount}/{totalQuestions}
@@ -293,7 +360,6 @@ export default function ExamTakingClient() {
               </div>
             </div>
 
-            {/* Timer */}
             <div
               className={`flex items-center gap-1.5 text-sm font-mono font-semibold px-2.5 py-1 rounded-md transition-colors ${
                 isTimeCritical
@@ -304,10 +370,9 @@ export default function ExamTakingClient() {
               }`}
             >
               <Clock className="w-3.5 h-3.5" />
-              {formatTime(timeLeft)}
+              {formatTime(effectiveTimeLeft)}
             </div>
 
-            {/* Mobile answer sheet trigger */}
             <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" size="sm" className="lg:hidden gap-1.5">
@@ -340,22 +405,18 @@ export default function ExamTakingClient() {
       </header>
 
       <div className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-6">
-        {/* Question Area */}
         <div className="space-y-5 min-w-0">
           {currentQuestion ? (
             <>
               <Card className="border shadow-sm">
                 <CardContent className="p-5 sm:p-7">
-                  {/* Question Header */}
                   <div className="flex items-start justify-between gap-3 mb-6">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
                         第 {currentIndex + 1} 题
                       </span>
                       <QuestionTypeLabel type={currentQuestion.type} />
-                      <span className="text-xs text-muted-foreground">
-                        {currentQuestion.score} 分
-                      </span>
+                      <span className="text-xs text-muted-foreground">{currentQuestion.score} 分</span>
                     </div>
                     <Button
                       variant="ghost"
@@ -372,12 +433,8 @@ export default function ExamTakingClient() {
                     </Button>
                   </div>
 
-                  {/* Stem */}
-                  <h2 className="text-base sm:text-lg font-medium leading-relaxed mb-6">
-                    {currentQuestion.stem}
-                  </h2>
+                  <h2 className="text-base sm:text-lg font-medium leading-relaxed mb-6">{currentQuestion.stem}</h2>
 
-                  {/* Single Choice */}
                   {currentQuestion.type === "single" && currentQuestion.options && (
                     <div className="space-y-2.5">
                       {currentQuestion.options.map((opt, idx) => {
@@ -403,9 +460,7 @@ export default function ExamTakingClient() {
                               >
                                 {value}
                               </span>
-                              <span className="pt-0.5 text-sm sm:text-base leading-relaxed">
-                                {opt}
-                              </span>
+                              <span className="pt-0.5 text-sm sm:text-base leading-relaxed">{opt}</span>
                             </div>
                           </button>
                         );
@@ -413,7 +468,6 @@ export default function ExamTakingClient() {
                     </div>
                   )}
 
-                  {/* Judge */}
                   {currentQuestion.type === "judge" && (
                     <div className="flex gap-3 sm:gap-4">
                       {[
@@ -432,12 +486,8 @@ export default function ExamTakingClient() {
                                 : "border-transparent bg-muted/40 hover:bg-muted hover:border-muted-foreground/20"
                             }`}
                           >
-                            <Icon
-                              className={`w-5 h-5 ${selected ? "text-primary" : "text-muted-foreground"}`}
-                            />
-                            <span
-                              className={`font-medium ${selected ? "text-primary" : "text-foreground"}`}
-                            >
+                            <Icon className={`w-5 h-5 ${selected ? "text-primary" : "text-muted-foreground"}`} />
+                            <span className={`font-medium ${selected ? "text-primary" : "text-foreground"}`}>
                               {opt.label}
                             </span>
                           </button>
@@ -446,7 +496,6 @@ export default function ExamTakingClient() {
                     </div>
                   )}
 
-                  {/* Essay */}
                   {currentQuestion.type === "essay" && (
                     <Textarea
                       placeholder="请输入您的答案..."
@@ -459,7 +508,6 @@ export default function ExamTakingClient() {
                 </CardContent>
               </Card>
 
-              {/* Navigation */}
               <div className="flex items-center justify-between">
                 <Button
                   variant="outline"
@@ -524,7 +572,6 @@ export default function ExamTakingClient() {
           )}
         </div>
 
-        {/* Desktop Sidebar - Answer Sheet */}
         <div className="hidden lg:block">
           <div className="sticky top-[72px]">
             <AnswerSheet
@@ -538,7 +585,6 @@ export default function ExamTakingClient() {
         </div>
       </div>
 
-      {/* Submit Dialog */}
       <Dialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -555,9 +601,7 @@ export default function ExamTakingClient() {
                 <p className="text-xs text-muted-foreground mt-1">已答题</p>
               </div>
               <div className="text-center p-4 rounded-lg bg-muted">
-                <p className="text-2xl font-bold text-foreground">
-                  {totalQuestions - answeredCount}
-                </p>
+                <p className="text-2xl font-bold text-foreground">{totalQuestions - answeredCount}</p>
                 <p className="text-xs text-muted-foreground mt-1">未答题</p>
               </div>
             </div>
@@ -583,7 +627,6 @@ export default function ExamTakingClient() {
         </DialogContent>
       </Dialog>
 
-      {/* Time Up Dialog */}
       <Dialog open={showTimeUpDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -604,7 +647,6 @@ export default function ExamTakingClient() {
   );
 }
 
-/* Answer Sheet Component */
 function AnswerSheet({
   questions,
   answers,
@@ -613,7 +655,7 @@ function AnswerSheet({
   onSelect,
   onClose,
 }: {
-  questions: Question[];
+  questions: StudentQuestionRecord[];
   answers: Record<string, string>;
   flagged: Set<string>;
   currentIndex: number;

@@ -125,9 +125,10 @@ async function deleteExam(req, res, next) {
   }
 }
 
-function listSubmissions(req, res, next) {
+async function listSubmissions(req, res, next) {
   try {
-    return ok(res, getAllSubmissionRecords(), "获取提交记录成功");
+    const submissions = await getAllSubmissionRecords();
+    return ok(res, submissions, "获取提交记录成功");
   } catch (error) {
     return next(error);
   }

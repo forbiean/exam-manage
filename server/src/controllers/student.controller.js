@@ -1,4 +1,7 @@
-const { getPublishedExamsForStudent } = require("../services/exam.service");
+const {
+  getExamsForStudent,
+  getExamPaperForStudent,
+} = require("../services/exam.service");
 const {
   startExam,
   submitExam,
@@ -6,17 +9,27 @@ const {
 } = require("../services/submission.service");
 const { ok } = require("../utils/response");
 
-function listPublishedExams(req, res, next) {
+async function listPublishedExams(req, res, next) {
   try {
-    return ok(res, getPublishedExamsForStudent(), "获取已发布考试成功");
+    const exams = await getExamsForStudent();
+    return ok(res, exams, "获取考试列表成功");
   } catch (error) {
     return next(error);
   }
 }
 
-function startOneExam(req, res, next) {
+async function getOneExamPaper(req, res, next) {
   try {
-    const submission = startExam({
+    const paper = await getExamPaperForStudent(req.params.examId);
+    return ok(res, paper, "获取考试试卷成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function startOneExam(req, res, next) {
+  try {
+    const submission = await startExam({
       examId: req.params.examId,
       studentId: req.user.sub,
     });
@@ -26,9 +39,9 @@ function startOneExam(req, res, next) {
   }
 }
 
-function submitOneExam(req, res, next) {
+async function submitOneExam(req, res, next) {
   try {
-    const submission = submitExam({
+    const submission = await submitExam({
       submissionId: req.params.submissionId,
       studentId: req.user.sub,
       answers: req.body?.answers,
@@ -39,9 +52,10 @@ function submitOneExam(req, res, next) {
   }
 }
 
-function myHistory(req, res, next) {
+async function myHistory(req, res, next) {
   try {
-    return ok(res, getStudentHistory(req.user.sub), "获取历史成绩成功");
+    const history = await getStudentHistory(req.user.sub);
+    return ok(res, history, "获取历史成绩成功");
   } catch (error) {
     return next(error);
   }
@@ -49,8 +63,8 @@ function myHistory(req, res, next) {
 
 module.exports = {
   listPublishedExams,
+  getOneExamPaper,
   startOneExam,
   submitOneExam,
   myHistory,
 };
-
