@@ -61,8 +61,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body.data;
 }
 
-export async function getQuestions() {
-  return request<QuestionRecord[]>(`${API_BASE_URL}/api/admin/questions`);
+export async function getQuestions(status: "active" | "inactive" | "all" = "active") {
+  const q = new URLSearchParams();
+  q.set("status", status);
+  return request<QuestionRecord[]>(`${API_BASE_URL}/api/admin/questions?${q.toString()}`);
 }
 
 export async function createQuestion(payload: {
@@ -98,8 +100,19 @@ export async function updateQuestion(
   });
 }
 
-export async function deleteQuestion(questionId: string) {
-  return request<{ id: string }>(`${API_BASE_URL}/api/admin/questions/${questionId}`, {
+export async function deleteQuestion(questionId: string, hardDelete = false) {
+  const q = new URLSearchParams();
+  if (hardDelete) q.set("hard", "true");
+  return request<{ id: string; hardDeleted: boolean }>(
+    `${API_BASE_URL}/api/admin/questions/${questionId}${q.toString() ? `?${q.toString()}` : ""}`,
+    {
     method: "DELETE",
+    }
+  );
+}
+
+export async function activateQuestion(questionId: string) {
+  return request<QuestionRecord>(`${API_BASE_URL}/api/admin/questions/${questionId}/activate`, {
+    method: "PATCH",
   });
 }

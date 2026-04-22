@@ -52,15 +52,22 @@ function validateQuestionPayload(payload, isUpdate = false) {
   }
 }
 
-async function listQuestions() {
+async function listQuestions(status = "active") {
+  const searchParams = {
+    select: "id,type,stem,options,correct_answer,analysis,score,category,is_active,created_at,updated_at",
+    order: "created_at.desc",
+  };
+
+  if (status === "active") {
+    searchParams.is_active = "eq.true";
+  } else if (status === "inactive") {
+    searchParams.is_active = "eq.false";
+  }
+
   const rows = await supabaseRequest({
     method: "GET",
     path: "/rest/v1/questions",
-    searchParams: {
-      select: "id,type,stem,options,correct_answer,analysis,score,category,is_active,created_at,updated_at",
-      is_active: "eq.true",
-      order: "created_at.desc",
-    },
+    searchParams,
   });
   return Array.isArray(rows) ? rows.map(normalizeQuestion) : [];
 }
@@ -142,7 +149,23 @@ async function updateQuestion(questionId, payload, operatorUserId) {
   return normalizeQuestion(rows[0]);
 }
 
-async function deleteQuestion(questionId, operatorUserId) {
+async function deleteQuestion(questionId, operatorUserId, hardDelete = false) {
+  if (hardDelete) {
+    const rows = await supabaseRequest({
+      method: "DELETE",
+      path: "/rest/v1/questions",
+      searchParams: {
+        id: `eq.${questionId}`,
+      },
+      headers: { Prefer: "return=representation" },
+    });
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new AppError(404, "题目不存在");
+    }
+    return { id: questionId, hardDeleted: true };
+  }
+
   const rows = await supabaseRequest({
     method: "PATCH",
     path: "/rest/v1/questions",
@@ -161,7 +184,28 @@ async function deleteQuestion(questionId, operatorUserId) {
     throw new AppError(404, "题目不存在");
   }
 
-  return { id: questionId };
+  return { id: questionId, hardDeleted: false };
+}
+
+async function activateQuestion(questionId, operatorUserId) {
+  const rows = await supabaseRequest({
+    method: "PATCH",
+    path: "/rest/v1/questions",
+    searchParams: {
+      id: `eq.${questionId}`,
+      is_active: "eq.false",
+    },
+    headers: { Prefer: "return=representation" },
+    body: {
+      is_active: true,
+      updated_by: operatorUserId || null,
+    },
+  });
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new AppError(404, "未激活题目不存在");
+  }
+  return normalizeQuestion(rows[0]);
 }
 
 module.exports = {
@@ -169,5 +213,5 @@ module.exports = {
   createQuestion,
   updateQuestion,
   deleteQuestion,
+  activateQuestion,
 };
-

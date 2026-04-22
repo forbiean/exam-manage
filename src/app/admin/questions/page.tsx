@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "@/components/admin-layout";
 import {
+  activateQuestion,
   createQuestion,
   deleteQuestion,
   getQuestions,
@@ -163,6 +164,7 @@ function formFromQuestion(q: QuestionRecord): QuestionForm {
 
 export default function AdminQuestionsPage() {
   const [questions, setQuestions] = useState<QuestionRecord[]>([]);
+  const [activeTab, setActiveTab] = useState<"list" | "category" | "inactive">("list");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -181,7 +183,7 @@ export default function AdminQuestionsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await getQuestions();
+      const data = await getQuestions("all");
       setQuestions(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载题库失败");
@@ -196,6 +198,16 @@ export default function AdminQuestionsPage() {
 
   const filtered = useMemo(() => {
     return questions.filter((q) => {
+      if (!q.isActive) return false;
+      const matchSearch = q.stem.toLowerCase().includes(search.toLowerCase());
+      const matchType = typeFilter === "all" || q.type === typeFilter;
+      return matchSearch && matchType;
+    });
+  }, [questions, search, typeFilter]);
+
+  const inactiveFiltered = useMemo(() => {
+    return questions.filter((q) => {
+      if (q.isActive) return false;
       const matchSearch = q.stem.toLowerCase().includes(search.toLowerCase());
       const matchType = typeFilter === "all" || q.type === typeFilter;
       return matchSearch && matchType;
@@ -203,8 +215,12 @@ export default function AdminQuestionsPage() {
   }, [questions, search, typeFilter]);
 
   const categories = useMemo(() => {
-    return Array.from(new Set(questions.map((q) => normalizeCategory(q.category)))).sort();
-  }, [questions]);
+    return Array.from(new Set(filtered.map((q) => normalizeCategory(q.category)))).sort();
+  }, [filtered]);
+
+  const inactiveCategories = useMemo(() => {
+    return Array.from(new Set(inactiveFiltered.map((q) => normalizeCategory(q.category)))).sort();
+  }, [inactiveFiltered]);
 
   const createCategorySelectValue =
     createForm.category.trim() && categories.includes(createForm.category.trim())
@@ -258,6 +274,26 @@ export default function AdminQuestionsPage() {
       await loadQuestions();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除题目失败");
+    }
+  }
+
+  async function handleHardDelete(q: QuestionRecord) {
+    const ok = window.confirm(`确认永久删除题目？\n该操作不可恢复。\n\n${q.stem}`);
+    if (!ok) return;
+    try {
+      await deleteQuestion(q.id, true);
+      await loadQuestions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "永久删除题目失败");
+    }
+  }
+
+  async function handleActivate(q: QuestionRecord) {
+    try {
+      await activateQuestion(q.id);
+      await loadQuestions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "恢复题目失败");
     }
   }
 
@@ -465,10 +501,11 @@ export default function AdminQuestionsPage() {
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {loading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
 
-        <Tabs defaultValue="list" className="w-full">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "list" | "category" | "inactive")} className="w-full">
           <TabsList className="mb-4">
             <TabsTrigger value="list">列表视图</TabsTrigger>
             <TabsTrigger value="category">分类视图</TabsTrigger>
+            <TabsTrigger value="inactive">未激活视图</TabsTrigger>
           </TabsList>
           <TabsContent value="list" className="space-y-3">
             {filtered.map((q, idx) => (
@@ -583,6 +620,59 @@ export default function AdminQuestionsPage() {
                 </Card>
               )}
             </div>
+          </TabsContent>
+          <TabsContent value="inactive" className="space-y-3">
+            {inactiveFiltered.map((q, idx) => (
+              <Card key={q.id} className="border-dashed border-muted-foreground/40">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-4">
+                    <span className="shrink-0 w-6 h-6 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+                      {idx + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                        {getTypeBadge(q.type)}
+                        <Badge variant="secondary">未激活</Badge>
+                        <span className="text-xs text-muted-foreground">{q.category}</span>
+                        <span className="text-xs text-muted-foreground">{q.score} 分</span>
+                      </div>
+                      <p className="text-sm font-medium mb-3">{q.stem}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="ghost" size="sm" className="h-8" onClick={() => handleActivate(q)}>
+                        恢复
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(q)}>
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-destructive"
+                        onClick={() => handleHardDelete(q)}
+                      >
+                        永久删除
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            {!loading && inactiveFiltered.length === 0 && (
+              <Card className="border-dashed">
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  <Database className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                  <p>没有未激活题目</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {!loading && inactiveCategories.length > 0 ? (
+              <div className="pt-2 text-xs text-muted-foreground">
+                当前未激活分类：{inactiveCategories.join(" / ")}
+              </div>
+            ) : null}
           </TabsContent>
         </Tabs>
       </div>

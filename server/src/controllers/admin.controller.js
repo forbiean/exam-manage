@@ -3,6 +3,7 @@ const {
   createQuestion: createQuestionService,
   updateQuestion: updateQuestionService,
   deleteQuestion: deleteQuestionService,
+  activateQuestion: activateQuestionService,
 } = require("../services/questionAdmin.service");
 const {
   createExamByAdmin,
@@ -21,7 +22,8 @@ const { ok } = require("../utils/response");
 
 async function listQuestions(req, res, next) {
   try {
-    const data = await listQuestionsService();
+    const status = String(req.query.status || "active");
+    const data = await listQuestionsService(status);
     return ok(res, data, "获取题库成功");
   } catch (error) {
     return next(error);
@@ -51,8 +53,19 @@ async function updateQuestion(req, res, next) {
 async function deleteQuestion(req, res, next) {
   try {
     const operatorUserId = req.user?.sub || null;
-    const result = await deleteQuestionService(req.params.questionId, operatorUserId);
+    const hardDelete = String(req.query.hard || "false") === "true";
+    const result = await deleteQuestionService(req.params.questionId, operatorUserId, hardDelete);
     return ok(res, result, "删除题目成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function activateQuestion(req, res, next) {
+  try {
+    const operatorUserId = req.user?.sub || null;
+    const result = await activateQuestionService(req.params.questionId, operatorUserId);
+    return ok(res, result, "恢复题目成功");
   } catch (error) {
     return next(error);
   }
@@ -147,6 +160,7 @@ module.exports = {
   createQuestion,
   updateQuestion,
   deleteQuestion,
+  activateQuestion,
   listExams,
   createExam,
   publishOneExam,
