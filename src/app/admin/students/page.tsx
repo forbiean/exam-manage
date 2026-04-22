@@ -87,6 +87,12 @@ export default function AdminStudentsPage() {
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
   const [failedRows, setFailedRows] = useState<Array<{ row_no: number; error_message: string | null }>>([]);
 
+  async function fetchStudents(params: { search: string; page: number }) {
+    const data = await getStudents({ search: params.search, page: params.page, pageSize });
+    setStudents(data.list);
+    setTotal(data.pagination.total);
+  }
+
   function buildPreview(csvText: string) {
     const lines = csvText
       .split(/\r?\n/)
@@ -117,9 +123,7 @@ export default function AdminStudentsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await getStudents({ search, page, pageSize });
-      setStudents(data.list);
-      setTotal(data.pagination.total);
+      await fetchStudents({ search, page });
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
@@ -139,9 +143,7 @@ export default function AdminStudentsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await getStudents({ search, page: 1, pageSize });
-      setStudents(data.list);
-      setTotal(data.pagination.total);
+      await fetchStudents({ search, page: 1 });
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
@@ -154,7 +156,15 @@ export default function AdminStudentsPage() {
       await createStudent(createForm);
       setCreateOpen(false);
       setCreateForm(emptyCreateForm);
-      await loadStudents();
+      setSearch("");
+      setPage(1);
+      setLoading(true);
+      setError("");
+      try {
+        await fetchStudents({ search: "", page: 1 });
+      } finally {
+        setLoading(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
     }
