@@ -18,6 +18,10 @@ function normalizeSubmissionRecord(row) {
   };
 }
 
+function normalizeQuestionType(type) {
+  return type === "short" ? "essay" : type;
+}
+
 async function ensureExamAvailableForStudent(examId) {
   const rows = await supabaseRequest({
     method: "GET",
@@ -287,6 +291,7 @@ async function getAllSubmissionRecords() {
     searchParams: {
       select:
         "id,exam_id,exam_title,student_id,student_name,status,total_score,max_score,needs_manual_review,started_at,submitted_at,reviewed_at,created_at,updated_at",
+      status: "in.(submitted,reviewed)",
       order: "submitted_at.desc.nullslast,created_at.desc",
     },
   });
@@ -294,9 +299,125 @@ async function getAllSubmissionRecords() {
   return Array.isArray(rows) ? rows.map(normalizeSubmissionRecord) : [];
 }
 
+async function getSubmissionDetailForAdmin(submissionId) {
+  const baseRows = await supabaseRequest({
+    method: "GET",
+    path: "/rest/v1/v_admin_submissions",
+    searchParams: {
+      select:
+        "id,exam_id,exam_title,student_id,student_name,status,total_score,max_score,needs_manual_review,started_at,submitted_at,reviewed_at,created_at,updated_at",
+      id: `eq.${submissionId}`,
+      status: "in.(submitted,reviewed)",
+      limit: 1,
+    },
+  });
+
+  if (!Array.isArray(baseRows) || baseRows.length === 0) {
+    throw new AppError(404, "提交记录不存在");
+  }
+  const base = normalizeSubmissionRecord(baseRows[0]);
+
+  const examQuestionRows = await supabaseRequest({
+    method: "GET",
+    path: "/rest/v1/exam_questions",
+    searchParams: {
+      select: "question_id,score,sort_order",
+      exam_id: `eq.${base.examId}`,
+      order: "sort_order.asc",
+    },
+  });
+
+  const questionIds = (Array.isArray(examQuestionRows) ? examQuestionRows : []).map((row) => row.question_id);
+  const questionScoreMap = new Map(
+    (Array.isArray(examQuestionRows) ? examQuestionRows : []).map((row) => [row.question_id, Number(row.score || 0)])
+  );
+  const questionOrderMap = new Map(
+    (Array.isArray(examQuestionRows) ? examQuestionRows : []).map((row) => [row.question_id, Number(row.sort_order || 0)])
+  );
+
+  const questionRows =
+    questionIds.length > 0
+      ? await supabaseRequest({
+          method: "GET",
+          path: "/rest/v1/questions",
+          searchParams: {
+            select: "id,type,stem,options,correct_answer,score",
+            id: `in.(${questionIds.join(",")})`,
+          },
+        })
+      : [];
+
+  const questionMap = new Map(
+    (Array.isArray(questionRows) ? questionRows : []).map((row) => [
+      row.id,
+      {
+        questionId: row.id,
+        type: normalizeQuestionType(row.type),
+        stem: row.stem,
+        options: Array.isArray(row.options) ? row.options : [],
+        correctAnswer: row.correct_answer,
+        questionScore:
+          questionScoreMap.get(row.id) === undefined
+            ? Number(row.score || 0)
+            : Number(questionScoreMap.get(row.id) || 0),
+        sortOrder: Number(questionOrderMap.get(row.id) || 0),
+      },
+    ])
+  );
+
+  const answerRows = await supabaseRequest({
+    method: "GET",
+    path: "/rest/v1/submission_answers",
+    searchParams: {
+      select:
+        "question_id,answer_text,is_correct,auto_score,manual_score,final_score,review_status,review_comment",
+      submission_id: `eq.${submissionId}`,
+    },
+  });
+
+  const answerMap = new Map(
+    (Array.isArray(answerRows) ? answerRows : []).map((row) => [
+      row.question_id,
+      {
+        studentAnswer: row.answer_text,
+        isCorrect: row.is_correct,
+        autoScore: Number(row.auto_score || 0),
+        manualScore: Number(row.manual_score || 0),
+        finalScore: Number(row.final_score || 0),
+        reviewStatus: row.review_status,
+        reviewComment: row.review_comment,
+      },
+    ])
+  );
+
+  const answers = questionIds
+    .map((qid) => {
+      const q = questionMap.get(qid);
+      if (!q) return null;
+      const a = answerMap.get(qid);
+      return {
+        ...q,
+        studentAnswer: a?.studentAnswer ?? "",
+        isCorrect: a?.isCorrect ?? null,
+        autoScore: a?.autoScore ?? 0,
+        manualScore: a?.manualScore ?? 0,
+        finalScore: a?.finalScore ?? 0,
+        reviewStatus: a?.reviewStatus ?? "pending_review",
+        reviewComment: a?.reviewComment ?? null,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    ...base,
+    answers,
+  };
+}
+
 module.exports = {
   startExam,
   submitExam,
   getStudentHistory,
   getAllSubmissionRecords,
+  getSubmissionDetailForAdmin,
 };

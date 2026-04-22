@@ -12,7 +12,10 @@ const {
   publishExam: publishExamService,
   deleteExam: deleteExamService,
 } = require("../services/examAdmin.service");
-const { getAllSubmissionRecords } = require("../services/submission.service");
+const {
+  getAllSubmissionRecords,
+  getSubmissionDetailForAdmin,
+} = require("../services/submission.service");
 const {
   listStudents: listStudentsService,
   createStudent: createStudentService,
@@ -134,6 +137,15 @@ async function listSubmissions(req, res, next) {
   }
 }
 
+async function getSubmissionDetail(req, res, next) {
+  try {
+    const detail = await getSubmissionDetailForAdmin(req.params.submissionId);
+    return ok(res, detail, "获取提交详情成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function listStudents(req, res, next) {
   try {
     const data = await listStudentsService({
@@ -196,6 +208,7 @@ module.exports = {
   publishOneExam,
   deleteExam,
   listSubmissions,
+  getSubmissionDetail,
   listStudents,
   createStudent,
   updateStudent,

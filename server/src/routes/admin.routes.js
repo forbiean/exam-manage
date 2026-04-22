@@ -13,6 +13,7 @@ const {
   publishOneExam,
   deleteExam,
   listSubmissions,
+  getSubmissionDetail,
   listStudents,
   createStudent,
   updateStudent,
@@ -38,6 +39,7 @@ router.patch("/exams/:examId/publish", publishOneExam);
 router.delete("/exams/:examId", deleteExam);
 
 router.get("/submissions", listSubmissions);
+router.get("/submissions/:submissionId", getSubmissionDetail);
 router.get("/students", listStudents);
 router.post("/students", createStudent);
 router.patch("/students/:studentId", updateStudent);

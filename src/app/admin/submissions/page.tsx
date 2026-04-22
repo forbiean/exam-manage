@@ -2,13 +2,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "@/components/admin-layout";
-import { getAdminSubmissions } from "@/lib/admin-submissions-api";
+import {
+  getAdminSubmissions,
+  getAdminSubmissionDetail,
+  type AdminSubmissionDetail,
+} from "@/lib/admin-submissions-api";
 import type { SubmissionRecord } from "@/lib/student-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -17,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, ClipboardList, User, Loader2 } from "lucide-react";
+import { Search, ClipboardList, Eye, User, Loader2 } from "lucide-react";
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -25,8 +39,6 @@ function getStatusBadge(status: string) {
       return <Badge className="bg-emerald-600 hover:bg-emerald-700">已评阅</Badge>;
     case "submitted":
       return <Badge variant="secondary">待复核</Badge>;
-    case "in_progress":
-      return <Badge variant="outline">进行中</Badge>;
     default:
       return <Badge variant="outline">未知</Badge>;
   }
@@ -43,12 +55,20 @@ function formatDate(dateStr?: string | null) {
   });
 }
 
+function optionValueFromIndex(index: number) {
+  return String.fromCharCode(65 + index);
+}
+
 export default function AdminSubmissionsPage() {
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const [selectedSubmission, setSelectedSubmission] = useState<AdminSubmissionDetail | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +102,21 @@ export default function AdminSubmissionsPage() {
       return matchSearch && matchStatus;
     });
   }, [search, statusFilter, submissions]);
+
+  async function handleViewDetail(submissionId: string) {
+    setDetailLoading(true);
+    setDetailOpen(true);
+    try {
+      const detail = await getAdminSubmissionDetail(submissionId);
+      setSelectedSubmission(detail);
+    } catch (err) {
+      setSelectedSubmission(null);
+      setError(err instanceof Error ? err.message : "加载提交详情失败");
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
 
   return (
     <AdminLayout>
@@ -162,7 +197,8 @@ export default function AdminSubmissionsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" disabled>
+                        <Button variant="ghost" size="sm" onClick={() => handleViewDetail(sub.id)}>
+                          <Eye className="w-4 h-4 mr-1" />
                           查看
                         </Button>
                       </TableCell>
@@ -180,6 +216,185 @@ export default function AdminSubmissionsPage() {
           </Card>
         )}
       </div>
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          {detailLoading ? (
+            <div className="py-16 text-center text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              加载详情中...
+            </div>
+          ) : selectedSubmission ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>提交详情</DialogTitle>
+                <DialogDescription>
+                  {selectedSubmission.studentName} - {selectedSubmission.examTitle}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 py-4">
+                <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">提交时间</p>
+                      <p className="font-medium">{formatDate(selectedSubmission.submittedAt)}</p>
+                    </div>
+                    <Separator orientation="vertical" className="h-8" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">状态</p>
+                      {getStatusBadge(selectedSubmission.status)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-muted-foreground">得分</p>
+                    <p className="text-2xl font-bold text-emerald-600">
+                      {selectedSubmission.totalScore ?? "—"}
+                      <span className="text-base text-muted-foreground font-normal">
+                        {" "}
+                        / {selectedSubmission.maxScore}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="font-semibold">答题详情</h3>
+                  {selectedSubmission.answers.length === 0 ? (
+                    <Card className="border-dashed">
+                      <CardContent className="py-10 text-center text-muted-foreground">
+                        该提交暂无答题明细
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    selectedSubmission.answers
+                      .slice()
+                      .sort((a, b) => a.sortOrder - b.sortOrder)
+                      .map((q, idx) => (
+                        <Card key={q.questionId} className="border">
+                          <CardContent className="p-4">
+                            <div className="flex items-start gap-3">
+                              <span className="shrink-0 w-6 h-6 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+                                {idx + 1}
+                              </span>
+                              <div className="flex-1">
+                                <p className="font-medium mb-2">{q.stem}</p>
+
+                                {q.type === "single" && (
+                                  <div className="space-y-1 text-sm">
+                                    {q.options.map((opt, optIdx) => {
+                                      const optValue = optionValueFromIndex(optIdx);
+                                      const isSelected = q.studentAnswer === optValue;
+                                      const isAnswer = q.correctAnswer === optValue;
+                                      return (
+                                        <div
+                                          key={optIdx}
+                                          className={`flex items-center gap-2 p-1.5 rounded ${
+                                            isSelected
+                                              ? q.isCorrect
+                                                ? "bg-emerald-100 text-emerald-700"
+                                                : "bg-red-100 text-red-700"
+                                              : isAnswer
+                                                ? "bg-emerald-50 text-emerald-600"
+                                                : ""
+                                          }`}
+                                        >
+                                          <span className="w-5 h-5 rounded-full border flex items-center justify-center text-xs">
+                                            {optValue}
+                                          </span>
+                                          <span>{opt}</span>
+                                          {isSelected && (
+                                            <span className="ml-auto text-xs">
+                                              {q.isCorrect ? "✓ 正确" : "✗ 错误"}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                {q.type === "judge" && (
+                                  <div className="flex items-center gap-4 text-sm">
+                                    <span
+                                      className={`flex items-center gap-1 ${
+                                        q.studentAnswer === "A"
+                                          ? q.isCorrect
+                                            ? "text-emerald-600 font-medium"
+                                            : "text-red-600 font-medium"
+                                          : ""
+                                      }`}
+                                    >
+                                      正确
+                                      {q.studentAnswer === "A" && (q.isCorrect ? " ✓" : " ✗")}
+                                    </span>
+                                    <span
+                                      className={`flex items-center gap-1 ${
+                                        q.studentAnswer === "B"
+                                          ? q.isCorrect
+                                            ? "text-emerald-600 font-medium"
+                                            : "text-red-600 font-medium"
+                                          : ""
+                                      }`}
+                                    >
+                                      错误
+                                      {q.studentAnswer === "B" && (q.isCorrect ? " ✓" : " ✗")}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {q.type === "essay" && (
+                                  <div className="space-y-2">
+                                    <div className="p-3 bg-muted rounded-lg text-sm">
+                                      <p className="text-muted-foreground mb-1">学生答案：</p>
+                                      <p>{q.studentAnswer || "（未作答）"}</p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="mt-3 text-xs text-muted-foreground">
+                                  本题得分：{q.finalScore} / {q.questionScore}
+                                </div>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))
+                  )}
+                </div>
+
+                {selectedSubmission.status === "submitted" && (
+                  <div className="space-y-3">
+                    <Separator />
+                    <h3 className="font-semibold">人工评阅</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>简答题得分</Label>
+                        <Input type="number" placeholder="输入得分" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>总分</Label>
+                        <Input type="number" placeholder="自动计算" disabled />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDetailOpen(false)}>
+                  关闭
+                </Button>
+                {selectedSubmission.status === "submitted" && (
+                  <Button onClick={() => setDetailOpen(false)}>保存评阅</Button>
+                )}
+              </DialogFooter>
+            </>
+          ) : (
+            <div className="py-16 text-center text-muted-foreground">未找到提交详情</div>
+          )}
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 }

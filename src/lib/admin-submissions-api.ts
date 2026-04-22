@@ -49,3 +49,27 @@ export async function getAdminSubmissions() {
   return request<SubmissionRecord[]>(`${API_BASE_URL}/api/admin/submissions`);
 }
 
+export type AdminSubmissionAnswerDetail = {
+  questionId: string;
+  type: "single" | "judge" | "essay";
+  stem: string;
+  options: string[];
+  correctAnswer: string | null;
+  questionScore: number;
+  sortOrder: number;
+  studentAnswer: string;
+  isCorrect: boolean | null;
+  autoScore: number;
+  manualScore: number;
+  finalScore: number;
+  reviewStatus: "auto_graded" | "pending_review" | "reviewed";
+  reviewComment: string | null;
+};
+
+export type AdminSubmissionDetail = SubmissionRecord & {
+  answers: AdminSubmissionAnswerDetail[];
+};
+
+export async function getAdminSubmissionDetail(submissionId: string) {
+  return request<AdminSubmissionDetail>(`${API_BASE_URL}/api/admin/submissions/${submissionId}`);
+}
