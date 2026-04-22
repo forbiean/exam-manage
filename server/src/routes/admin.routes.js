@@ -5,6 +5,7 @@ const {
   listQuestions,
   createQuestion,
   updateQuestion,
+  deleteQuestion,
   listExams,
   createExam,
   publishOneExam,
@@ -24,6 +25,7 @@ router.use(requireRole("admin"));
 router.get("/questions", listQuestions);
 router.post("/questions", createQuestion);
 router.patch("/questions/:questionId", updateQuestion);
+router.delete("/questions/:questionId", deleteQuestion);
 
 router.get("/exams", listExams);
 router.post("/exams", createExam);

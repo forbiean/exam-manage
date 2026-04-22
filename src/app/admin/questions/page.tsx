@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "@/components/admin-layout";
-import { mockQuestions } from "@/lib/mock-data";
+import {
+  createQuestion,
+  deleteQuestion,
+  getQuestions,
+  type QuestionRecord,
+  type QuestionType,
+  updateQuestion,
+} from "@/lib/admin-questions-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,20 +25,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import { Plus, Search, Database, Pencil, Trash2, CheckCircle2, XCircle, HelpCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Search, Database, Pencil, Trash2, CheckCircle2, XCircle } from "lucide-react";
+
+type QuestionForm = {
+  type: QuestionType;
+  stem: string;
+  category: string;
+  score: number;
+  options: string[];
+  correctAnswer: string;
+  analysis: string;
+};
+
+const defaultForm: QuestionForm = {
+  type: "single",
+  stem: "",
+  category: "",
+  score: 5,
+  options: ["", "", "", ""],
+  correctAnswer: "",
+  analysis: "",
+};
 
 function getTypeBadge(type: string) {
   switch (type) {
@@ -46,32 +62,194 @@ function getTypeBadge(type: string) {
   }
 }
 
-function getTypeLabel(type: string) {
-  switch (type) {
-    case "single":
-      return "单选题";
-    case "judge":
-      return "判断题";
-    case "essay":
-      return "简答题";
-    default:
-      return type;
+function normalizeCorrectAnswer(type: QuestionType, raw: string) {
+  if (type === "single") {
+    const v = raw.trim().toUpperCase();
+    return ["A", "B", "C", "D"].includes(v) ? v : "";
   }
+  if (type === "judge") {
+    if (raw === "A" || raw === "B") return raw;
+    if (raw.toLowerCase() === "true") return "A";
+    if (raw.toLowerCase() === "false") return "B";
+    return "";
+  }
+  return "";
+}
+
+function buildPayload(form: QuestionForm) {
+  const type = form.type;
+  const stem = form.stem.trim();
+  const category = form.category.trim() || "未分类";
+  const score = Number(form.score) || 1;
+  const analysis = form.analysis.trim();
+
+  if (!stem) {
+    throw new Error("题目内容不能为空");
+  }
+  if (score <= 0) {
+    throw new Error("分值必须大于 0");
+  }
+
+  if (type === "single") {
+    const options = form.options.map((s) => s.trim()).filter(Boolean);
+    if (options.length < 2) {
+      throw new Error("单选题至少需要 2 个选项");
+    }
+    const correctAnswer = normalizeCorrectAnswer(type, form.correctAnswer);
+    if (!correctAnswer) {
+      throw new Error("请选择单选题正确答案");
+    }
+    return {
+      type,
+      stem,
+      category,
+      score,
+      options,
+      correctAnswer,
+      analysis: analysis || undefined,
+    };
+  }
+
+  if (type === "judge") {
+    const correctAnswer = normalizeCorrectAnswer(type, form.correctAnswer);
+    if (!correctAnswer) {
+      throw new Error("请选择判断题正确答案");
+    }
+    return {
+      type,
+      stem,
+      category,
+      score,
+      options: ["正确", "错误"],
+      correctAnswer,
+      analysis: analysis || undefined,
+    };
+  }
+
+  return {
+    type,
+    stem,
+    category,
+    score,
+    options: [],
+    analysis: analysis || undefined,
+  };
+}
+
+function formFromQuestion(q: QuestionRecord): QuestionForm {
+  const base: QuestionForm = {
+    type: q.type,
+    stem: q.stem,
+    category: q.category,
+    score: q.score,
+    options: ["", "", "", ""],
+    correctAnswer: q.correctAnswer || "",
+    analysis: q.analysis || "",
+  };
+
+  if (q.type === "single") {
+    const opts = [...q.options, "", "", "", ""].slice(0, 4);
+    return { ...base, options: opts };
+  }
+  return base;
 }
 
 export default function AdminQuestionsPage() {
+  const [questions, setQuestions] = useState<QuestionRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [newQuestionType, setNewQuestionType] = useState<string>("single");
 
-  const filtered = mockQuestions.filter((q) => {
-    const matchSearch = q.stem.toLowerCase().includes(search.toLowerCase());
-    const matchType = typeFilter === "all" || q.type === typeFilter;
-    return matchSearch && matchType;
-  });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<QuestionForm>(defaultForm);
+  const [savingCreate, setSavingCreate] = useState(false);
 
-  const categories = Array.from(new Set(mockQuestions.map((q) => q.category)));
+  const [editing, setEditing] = useState<QuestionRecord | null>(null);
+  const [editForm, setEditForm] = useState<QuestionForm>(defaultForm);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  async function loadQuestions() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await getQuestions();
+      setQuestions(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载题库失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadQuestions();
+  }, []);
+
+  const filtered = useMemo(() => {
+    return questions.filter((q) => {
+      const matchSearch = q.stem.toLowerCase().includes(search.toLowerCase());
+      const matchType = typeFilter === "all" || q.type === typeFilter;
+      return matchSearch && matchType;
+    });
+  }, [questions, search, typeFilter]);
+
+  const categories = useMemo(() => {
+    return Array.from(new Set(questions.map((q) => q.category))).sort();
+  }, [questions]);
+
+  async function handleCreate() {
+    setSavingCreate(true);
+    try {
+      const payload = buildPayload(createForm);
+      await createQuestion(payload);
+      setCreateOpen(false);
+      setCreateForm(defaultForm);
+      await loadQuestions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建题目失败");
+    } finally {
+      setSavingCreate(false);
+    }
+  }
+
+  function openEdit(q: QuestionRecord) {
+    setEditing(q);
+    setEditForm(formFromQuestion(q));
+  }
+
+  async function handleSaveEdit() {
+    if (!editing) return;
+    setSavingEdit(true);
+    try {
+      const payload = buildPayload(editForm);
+      await updateQuestion(editing.id, payload);
+      setEditing(null);
+      await loadQuestions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新题目失败");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleDelete(q: QuestionRecord) {
+    const ok = window.confirm(`确认删除题目？\n${q.stem}`);
+    if (!ok) return;
+    try {
+      await deleteQuestion(q.id);
+      await loadQuestions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除题目失败");
+    }
+  }
+
+  function setOptionValue(setter: (v: QuestionForm) => void, form: QuestionForm, index: number, value: string) {
+    const next = [...form.options];
+    next[index] = value;
+    setter({ ...form, options: next });
+  }
 
   return (
     <AdminLayout>
@@ -81,7 +259,8 @@ export default function AdminQuestionsPage() {
             <h1 className="text-2xl font-bold tracking-tight">题库管理</h1>
             <p className="text-muted-foreground mt-1">管理考试题目，支持单选、判断、简答多种题型</p>
           </div>
-          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="w-4 h-4 mr-1.5" />
@@ -96,7 +275,17 @@ export default function AdminQuestionsPage() {
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label>题目类型</Label>
-                  <Select value={newQuestionType} onValueChange={setNewQuestionType}>
+                  <Select
+                    value={createForm.type}
+                    onValueChange={(v) =>
+                      setCreateForm({
+                        ...createForm,
+                        type: v as QuestionType,
+                        correctAnswer: "",
+                        options: ["", "", "", ""],
+                      })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -109,47 +298,60 @@ export default function AdminQuestionsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>题目内容</Label>
-                  <Textarea placeholder="请输入题目内容..." rows={3} />
+                  <Textarea
+                    placeholder="请输入题目内容..."
+                    rows={3}
+                    value={createForm.stem}
+                    onChange={(e) => setCreateForm({ ...createForm, stem: e.target.value })}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>分类</Label>
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择分类" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map((cat) => (
-                          <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                        ))}
-                        <SelectItem value="new">+ 新建分类</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      placeholder="例如：编程基础"
+                      value={createForm.category}
+                      onChange={(e) => setCreateForm({ ...createForm, category: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>分值</Label>
-                    <Input type="number" placeholder="5" />
+                    <Input
+                      type="number"
+                      placeholder="5"
+                      value={createForm.score}
+                      onChange={(e) => setCreateForm({ ...createForm, score: Number(e.target.value) })}
+                    />
                   </div>
                 </div>
 
-                {newQuestionType === "single" && (
+                {createForm.type === "single" && (
                   <div className="space-y-3">
                     <Label>选项</Label>
                     {["A", "B", "C", "D"].map((opt, idx) => (
                       <div key={opt} className="flex items-center gap-2">
                         <span className="w-6 text-sm font-medium text-muted-foreground">{opt}.</span>
-                        <Input placeholder={`选项 ${opt}`} />
+                        <Input
+                          placeholder={`选项 ${opt}`}
+                          value={createForm.options[idx] || ""}
+                          onChange={(e) => setOptionValue(setCreateForm, createForm, idx, e.target.value)}
+                        />
                       </div>
                     ))}
                     <div className="space-y-2 pt-2">
                       <Label>正确答案</Label>
-                      <Select>
+                      <Select
+                        value={createForm.correctAnswer}
+                        onValueChange={(v) => setCreateForm({ ...createForm, correctAnswer: v })}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="选择正确答案" />
                         </SelectTrigger>
                         <SelectContent>
                           {["A", "B", "C", "D"].map((opt) => (
-                            <SelectItem key={opt} value={opt}>选项 {opt}</SelectItem>
+                            <SelectItem key={opt} value={opt}>
+                              选项 {opt}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -157,10 +359,13 @@ export default function AdminQuestionsPage() {
                   </div>
                 )}
 
-                {newQuestionType === "judge" && (
+                {createForm.type === "judge" && (
                   <div className="space-y-2">
                     <Label>正确答案</Label>
-                    <Select>
+                    <Select
+                      value={createForm.correctAnswer}
+                      onValueChange={(v) => setCreateForm({ ...createForm, correctAnswer: v })}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="选择正确答案" />
                       </SelectTrigger>
@@ -172,24 +377,28 @@ export default function AdminQuestionsPage() {
                   </div>
                 )}
 
-                {newQuestionType === "essay" && (
-                  <div className="space-y-2">
-                    <Label>参考答案（可选）</Label>
-                    <Textarea placeholder="输入参考答案或评分要点..." rows={3} />
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <Label>{createForm.type === "essay" ? "参考答案（可选）" : "解析（可选）"}</Label>
+                  <Textarea
+                    placeholder="输入参考答案或解析..."
+                    rows={3}
+                    value={createForm.analysis}
+                    onChange={(e) => setCreateForm({ ...createForm, analysis: e.target.value })}
+                  />
+                </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                <Button variant="outline" onClick={() => setCreateOpen(false)}>
                   取消
                 </Button>
-                <Button onClick={() => setShowCreateDialog(false)}>保存</Button>
+                <Button onClick={handleCreate} disabled={savingCreate}>
+                  保存
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
 
-        {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -213,7 +422,9 @@ export default function AdminQuestionsPage() {
           </Select>
         </div>
 
-        {/* Questions List */}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {loading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
+
         <Tabs defaultValue="list" className="w-full">
           <TabsList className="mb-4">
             <TabsTrigger value="list">列表视图</TabsTrigger>
@@ -234,26 +445,25 @@ export default function AdminQuestionsPage() {
                         <span className="text-xs text-muted-foreground">{q.score} 分</span>
                       </div>
                       <p className="text-sm font-medium mb-3">{q.stem}</p>
-                      {q.options && (
+                      {q.type === "single" && q.options.length > 0 && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-muted-foreground mb-3">
-                          {q.options.map((opt, optIdx) => (
-                            <div
-                              key={optIdx}
-                              className={`flex items-center gap-2 ${
-                                q.correctAnswer === String.fromCharCode(65 + optIdx)
-                                  ? "text-emerald-600 font-medium"
-                                  : ""
-                              }`}
-                            >
-                              <span className="w-5 h-5 rounded-full border flex items-center justify-center text-xs">
-                                {String.fromCharCode(65 + optIdx)}
-                              </span>
-                              <span className="truncate">{opt}</span>
-                              {q.correctAnswer === String.fromCharCode(65 + optIdx) && (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                              )}
-                            </div>
-                          ))}
+                          {q.options.map((opt, optIdx) => {
+                            const optValue = String.fromCharCode(65 + optIdx);
+                            return (
+                              <div
+                                key={optIdx}
+                                className={`flex items-center gap-2 ${
+                                  q.correctAnswer === optValue ? "text-emerald-600 font-medium" : ""
+                                }`}
+                              >
+                                <span className="w-5 h-5 rounded-full border flex items-center justify-center text-xs">
+                                  {optValue}
+                                </span>
+                                <span className="truncate">{opt}</span>
+                                {q.correctAnswer === optValue && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                       {q.type === "judge" && (
@@ -263,11 +473,7 @@ export default function AdminQuestionsPage() {
                               q.correctAnswer === "A" ? "text-emerald-600 font-medium" : ""
                             }`}
                           >
-                            {q.correctAnswer === "A" ? (
-                              <CheckCircle2 className="w-4 h-4" />
-                            ) : (
-                              <XCircle className="w-4 h-4" />
-                            )}
+                            {q.correctAnswer === "A" ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                             正确
                           </span>
                           <span
@@ -275,21 +481,22 @@ export default function AdminQuestionsPage() {
                               q.correctAnswer === "B" ? "text-emerald-600 font-medium" : ""
                             }`}
                           >
-                            {q.correctAnswer === "B" ? (
-                              <CheckCircle2 className="w-4 h-4" />
-                            ) : (
-                              <XCircle className="w-4 h-4" />
-                            )}
+                            {q.correctAnswer === "B" ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                             错误
                           </span>
                         </div>
                       )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(q)}>
                         <Pencil className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive"
+                        onClick={() => handleDelete(q)}
+                      >
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -297,7 +504,7 @@ export default function AdminQuestionsPage() {
                 </CardContent>
               </Card>
             ))}
-            {filtered.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <Card className="border-dashed">
                 <CardContent className="py-12 text-center text-muted-foreground">
                   <Database className="w-10 h-10 mx-auto mb-3 opacity-50" />
@@ -309,9 +516,9 @@ export default function AdminQuestionsPage() {
           <TabsContent value="category">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {categories.map((cat) => {
-                const count = mockQuestions.filter((q) => q.category === cat).length;
+                const count = questions.filter((q) => q.category === cat).length;
                 return (
-                  <Card key={cat} className="hover:shadow-sm transition-shadow cursor-pointer">
+                  <Card key={cat} className="hover:shadow-sm transition-shadow">
                     <CardContent className="p-5">
                       <div className="flex items-start justify-between">
                         <div>
@@ -327,10 +534,137 @@ export default function AdminQuestionsPage() {
                   </Card>
                 );
               })}
+              {categories.length === 0 && !loading && (
+                <Card className="border-dashed sm:col-span-2 lg:col-span-3">
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    <Database className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                    <p>暂无分类数据</p>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>编辑题目</DialogTitle>
+            <DialogDescription>修改题目内容与配置。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>题目类型</Label>
+              <Select
+                value={editForm.type}
+                onValueChange={(v) =>
+                  setEditForm({
+                    ...editForm,
+                    type: v as QuestionType,
+                    correctAnswer: "",
+                    options: ["", "", "", ""],
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single">单选题</SelectItem>
+                  <SelectItem value="judge">判断题</SelectItem>
+                  <SelectItem value="essay">简答题</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>题目内容</Label>
+              <Textarea
+                rows={3}
+                value={editForm.stem}
+                onChange={(e) => setEditForm({ ...editForm, stem: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>分类</Label>
+                <Input value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>分值</Label>
+                <Input
+                  type="number"
+                  value={editForm.score}
+                  onChange={(e) => setEditForm({ ...editForm, score: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+
+            {editForm.type === "single" && (
+              <div className="space-y-3">
+                <Label>选项</Label>
+                {["A", "B", "C", "D"].map((opt, idx) => (
+                  <div key={opt} className="flex items-center gap-2">
+                    <span className="w-6 text-sm font-medium text-muted-foreground">{opt}.</span>
+                    <Input
+                      value={editForm.options[idx] || ""}
+                      onChange={(e) => setOptionValue(setEditForm, editForm, idx, e.target.value)}
+                    />
+                  </div>
+                ))}
+                <div className="space-y-2 pt-2">
+                  <Label>正确答案</Label>
+                  <Select value={editForm.correctAnswer} onValueChange={(v) => setEditForm({ ...editForm, correctAnswer: v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择正确答案" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["A", "B", "C", "D"].map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          选项 {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {editForm.type === "judge" && (
+              <div className="space-y-2">
+                <Label>正确答案</Label>
+                <Select value={editForm.correctAnswer} onValueChange={(v) => setEditForm({ ...editForm, correctAnswer: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择正确答案" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="A">正确</SelectItem>
+                    <SelectItem value="B">错误</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>{editForm.type === "essay" ? "参考答案（可选）" : "解析（可选）"}</Label>
+              <Textarea
+                rows={3}
+                value={editForm.analysis}
+                onChange={(e) => setEditForm({ ...editForm, analysis: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={savingEdit}>
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 }
+

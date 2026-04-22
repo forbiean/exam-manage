@@ -1,8 +1,9 @@
 const {
-  getAllQuestions,
-  addQuestion,
-  editQuestion,
-} = require("../services/question.service");
+  listQuestions: listQuestionsService,
+  createQuestion: createQuestionService,
+  updateQuestion: updateQuestionService,
+  deleteQuestion: deleteQuestionService,
+} = require("../services/questionAdmin.service");
 const {
   createExamByAdmin,
   publishExam,
@@ -18,27 +19,40 @@ const {
 } = require("../services/studentAdmin.service");
 const { ok } = require("../utils/response");
 
-function listQuestions(req, res, next) {
+async function listQuestions(req, res, next) {
   try {
-    return ok(res, getAllQuestions(), "获取题库成功");
+    const data = await listQuestionsService();
+    return ok(res, data, "获取题库成功");
   } catch (error) {
     return next(error);
   }
 }
 
-function createQuestion(req, res, next) {
+async function createQuestion(req, res, next) {
   try {
-    const question = addQuestion(req.body || {});
+    const operatorUserId = req.user?.sub || null;
+    const question = await createQuestionService(req.body || {}, operatorUserId);
     return ok(res, question, "创建题目成功", 201);
   } catch (error) {
     return next(error);
   }
 }
 
-function updateQuestion(req, res, next) {
+async function updateQuestion(req, res, next) {
   try {
-    const question = editQuestion(req.params.questionId, req.body || {});
+    const operatorUserId = req.user?.sub || null;
+    const question = await updateQuestionService(req.params.questionId, req.body || {}, operatorUserId);
     return ok(res, question, "更新题目成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function deleteQuestion(req, res, next) {
+  try {
+    const operatorUserId = req.user?.sub || null;
+    const result = await deleteQuestionService(req.params.questionId, operatorUserId);
+    return ok(res, result, "删除题目成功");
   } catch (error) {
     return next(error);
   }
@@ -132,6 +146,7 @@ module.exports = {
   listQuestions,
   createQuestion,
   updateQuestion,
+  deleteQuestion,
   listExams,
   createExam,
   publishOneExam,
