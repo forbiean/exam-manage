@@ -9,7 +9,9 @@ const {
   activateQuestion,
   listExams,
   createExam,
+  updateExamQuestions,
   publishOneExam,
+  deleteExam,
   listSubmissions,
   listStudents,
   createStudent,
@@ -31,7 +33,9 @@ router.delete("/questions/:questionId", deleteQuestion);
 
 router.get("/exams", listExams);
 router.post("/exams", createExam);
+router.patch("/exams/:examId/questions", updateExamQuestions);
 router.patch("/exams/:examId/publish", publishOneExam);
+router.delete("/exams/:examId", deleteExam);
 
 router.get("/submissions", listSubmissions);
 router.get("/students", listStudents);

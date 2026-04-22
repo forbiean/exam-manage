@@ -1,13 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "@/components/admin-layout";
-import { mockExams } from "@/lib/mock-data";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -17,15 +14,30 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Plus, Search, Clock, Calendar, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Search, Clock, Calendar, FileText, Pencil, Trash2 } from "lucide-react";
+import { createExam, deleteExam, getExams, updateExamQuestions, type ExamRecord, type ExamStatus } from "@/lib/admin-exams-api";
+import { getQuestions, type QuestionRecord } from "@/lib/admin-questions-api";
+
+type CreateExamForm = {
+  title: string;
+  description: string;
+  durationMinutes: number;
+  status: ExamStatus;
+  startTime: string;
+  endTime: string;
+};
+
+const emptyCreateForm: CreateExamForm = {
+  title: "",
+  description: "",
+  durationMinutes: 60,
+  status: "draft",
+  startTime: "",
+  endTime: "",
+};
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -40,7 +52,8 @@ function getStatusBadge(status: string) {
   }
 }
 
-function formatDate(dateStr: string) {
+function formatDate(dateStr: string | null) {
+  if (!dateStr) return "—";
   const d = new Date(dateStr);
   return d.toLocaleDateString("zh-CN", {
     month: "short",
@@ -51,15 +64,127 @@ function formatDate(dateStr: string) {
 }
 
 export default function AdminExamsPage() {
+  const [exams, setExams] = useState<ExamRecord[]>([]);
+  const [questions, setQuestions] = useState<QuestionRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
-  const filtered = mockExams.filter((exam) => {
-    const matchSearch = exam.title.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === "all" || exam.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateExamForm>(emptyCreateForm);
+  const [creating, setCreating] = useState(false);
+
+  const [editingExam, setEditingExam] = useState<ExamRecord | null>(null);
+  const [editQuestionIds, setEditQuestionIds] = useState<string[]>([""]);
+  const [savingQuestions, setSavingQuestions] = useState(false);
+
+  async function loadAll() {
+    setLoading(true);
+    setError("");
+    try {
+      const [examData, questionData] = await Promise.all([getExams(), getQuestions("active")]);
+      setExams(examData);
+      setQuestions(questionData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  const filtered = useMemo(() => {
+    return exams.filter((exam) => {
+      const matchSearch = exam.title.toLowerCase().includes(search.toLowerCase());
+      const matchStatus = statusFilter === "all" || exam.status === statusFilter;
+      return matchSearch && matchStatus;
+    });
+  }, [exams, search, statusFilter]);
+
+  async function handleCreateExam() {
+    const title = createForm.title.trim();
+    if (!title) {
+      setError("考试名称不能为空");
+      return;
+    }
+    if (createForm.durationMinutes <= 0) {
+      setError("考试时长必须大于 0");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      await createExam({
+        title,
+        description: createForm.description.trim(),
+        durationMinutes: createForm.durationMinutes,
+        status: createForm.status,
+        startTime: createForm.startTime ? new Date(createForm.startTime).toISOString() : null,
+        endTime: createForm.endTime ? new Date(createForm.endTime).toISOString() : null,
+      });
+      setCreateOpen(false);
+      setCreateForm(emptyCreateForm);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建考试失败");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function openEditQuestions(exam: ExamRecord) {
+    setEditingExam(exam);
+    const ids = exam.questionIds.length > 0 ? exam.questionIds : [""];
+    setEditQuestionIds(ids);
+  }
+
+  function addQuestionSelectRow() {
+    setEditQuestionIds((prev) => [...prev, ""]);
+  }
+
+  function setQuestionSelectValue(index: number, questionId: string) {
+    setEditQuestionIds((prev) => prev.map((v, i) => (i === index ? questionId : v)));
+  }
+
+  async function handleSaveExamQuestions() {
+    if (!editingExam) return;
+    const normalized = editQuestionIds.map((id) => id.trim()).filter(Boolean);
+    if (normalized.length === 0) {
+      setError("至少选择 1 道题目");
+      return;
+    }
+    if (new Set(normalized).size !== normalized.length) {
+      setError("同一场考试中不能重复选择同一道题");
+      return;
+    }
+
+    setSavingQuestions(true);
+    try {
+      await updateExamQuestions(editingExam.id, normalized);
+      setEditingExam(null);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新考试题目失败");
+    } finally {
+      setSavingQuestions(false);
+    }
+  }
+
+  async function handleDeleteExam(exam: ExamRecord) {
+    const confirmed = window.confirm(`确认删除考试？\n${exam.title}`);
+    if (!confirmed) return;
+    try {
+      await deleteExam(exam.id);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除考试失败");
+    }
+  }
 
   return (
     <AdminLayout>
@@ -67,9 +192,9 @@ export default function AdminExamsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">考试管理</h1>
-            <p className="text-muted-foreground mt-1">创建、编辑和发布考试</p>
+            <p className="text-muted-foreground mt-1">创建、编辑和删除考试</p>
           </div>
-          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="w-4 h-4 mr-1.5" />
@@ -79,49 +204,83 @@ export default function AdminExamsPage() {
             <DialogContent className="max-w-lg">
               <DialogHeader>
                 <DialogTitle>创建新考试</DialogTitle>
-                <DialogDescription>填写考试基本信息，创建后可添加题目。</DialogDescription>
+                <DialogDescription>填写考试基本信息，状态默认草稿。</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label>考试名称</Label>
-                  <Input placeholder="例如：前端开发基础测试" />
+                  <Input
+                    placeholder="例如：前端开发基础测试"
+                    value={createForm.title}
+                    onChange={(e) => setCreateForm({ ...createForm, title: e.target.value })}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>考试说明</Label>
-                  <Input placeholder="简要描述考试内容" />
+                  <Input
+                    placeholder="简要描述考试内容"
+                    value={createForm.description}
+                    onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>考试时长（分钟）</Label>
-                    <Input type="number" placeholder="60" />
+                    <Input
+                      type="number"
+                      placeholder="60"
+                      value={createForm.durationMinutes}
+                      onChange={(e) => setCreateForm({ ...createForm, durationMinutes: Number(e.target.value) })}
+                    />
                   </div>
                   <div className="space-y-2">
-                    <Label>总分</Label>
-                    <Input type="number" placeholder="100" />
+                    <Label>状态</Label>
+                    <Select
+                      value={createForm.status}
+                      onValueChange={(v) => setCreateForm({ ...createForm, status: v as ExamStatus })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="draft">草稿</SelectItem>
+                        <SelectItem value="published">已发布</SelectItem>
+                        <SelectItem value="closed">已关闭</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>开始时间</Label>
-                    <Input type="datetime-local" />
+                    <Input
+                      type="datetime-local"
+                      value={createForm.startTime}
+                      onChange={(e) => setCreateForm({ ...createForm, startTime: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>结束时间</Label>
-                    <Input type="datetime-local" />
+                    <Input
+                      type="datetime-local"
+                      value={createForm.endTime}
+                      onChange={(e) => setCreateForm({ ...createForm, endTime: e.target.value })}
+                    />
                   </div>
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                <Button variant="outline" onClick={() => setCreateOpen(false)}>
                   取消
                 </Button>
-                <Button onClick={() => setShowCreateDialog(false)}>创建</Button>
+                <Button onClick={handleCreateExam} disabled={creating}>
+                  创建
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
 
-        {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -145,7 +304,9 @@ export default function AdminExamsPage() {
           </Select>
         </div>
 
-        {/* Exams Table */}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {loading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
+
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -165,14 +326,10 @@ export default function AdminExamsPage() {
                       <td className="px-4 py-3">
                         <div>
                           <p className="font-medium">{exam.title}</p>
-                          <p className="text-xs text-muted-foreground line-clamp-1">
-                            {exam.description}
-                          </p>
+                          <p className="text-xs text-muted-foreground line-clamp-1">{exam.description || "—"}</p>
                         </div>
                       </td>
-                      <td className="px-4 py-3 hidden sm:table-cell">
-                        {getStatusBadge(exam.status)}
-                      </td>
+                      <td className="px-4 py-3 hidden sm:table-cell">{getStatusBadge(exam.status)}</td>
                       <td className="px-4 py-3 hidden md:table-cell">
                         <div className="text-xs text-muted-foreground space-y-0.5">
                           <p className="flex items-center gap-1">
@@ -192,10 +349,15 @@ export default function AdminExamsPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditQuestions(exam)}>
                             <Pencil className="w-4 h-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive"
+                            onClick={() => handleDeleteExam(exam)}
+                          >
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
@@ -205,7 +367,7 @@ export default function AdminExamsPage() {
                 </tbody>
               </table>
             </div>
-            {filtered.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <div className="py-12 text-center text-muted-foreground">
                 <FileText className="w-10 h-10 mx-auto mb-3 opacity-50" />
                 <p>没有找到匹配的考试</p>
@@ -214,6 +376,50 @@ export default function AdminExamsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={Boolean(editingExam)} onOpenChange={(open) => !open && setEditingExam(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>修改考试题目</DialogTitle>
+            <DialogDescription>
+              {editingExam ? `考试：${editingExam.title}` : "从题库中选择题目，至少选择 1 道题。"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            {editQuestionIds.map((questionId, idx) => (
+              <div key={`q-select-${idx}`} className="space-y-2">
+                <Label>{idx === 0 ? "从题库中选择题目" : `题目 ${idx + 1}`}</Label>
+                <Select value={questionId} onValueChange={(v) => setQuestionSelectValue(idx, v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="请选择题目" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {questions.map((q) => (
+                      <SelectItem key={q.id} value={q.id}>
+                        [{q.category}] {q.stem}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+
+            <Button variant="outline" onClick={addQuestionSelectRow}>
+              增加考试题目
+            </Button>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingExam(null)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveExamQuestions} disabled={savingQuestions}>
+              保存题目
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 }

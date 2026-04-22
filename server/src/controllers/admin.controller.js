@@ -6,10 +6,12 @@ const {
   activateQuestion: activateQuestionService,
 } = require("../services/questionAdmin.service");
 const {
-  createExamByAdmin,
-  publishExam,
-  getAllExamsForAdmin,
-} = require("../services/exam.service");
+  listExams: listExamsService,
+  createExam: createExamService,
+  updateExamQuestions: updateExamQuestionsService,
+  publishExam: publishExamService,
+  deleteExam: deleteExamService,
+} = require("../services/examAdmin.service");
 const { getAllSubmissionRecords } = require("../services/submission.service");
 const {
   listStudents: listStudentsService,
@@ -71,27 +73,53 @@ async function activateQuestion(req, res, next) {
   }
 }
 
-function listExams(req, res, next) {
+async function listExams(req, res, next) {
   try {
-    return ok(res, getAllExamsForAdmin(), "获取考试列表成功");
+    const data = await listExamsService();
+    return ok(res, data, "获取考试列表成功");
   } catch (error) {
     return next(error);
   }
 }
 
-function createExam(req, res, next) {
+async function createExam(req, res, next) {
   try {
-    const exam = createExamByAdmin(req.body || {});
+    const operatorUserId = req.user?.sub || null;
+    const exam = await createExamService(req.body || {}, operatorUserId);
     return ok(res, exam, "创建考试成功", 201);
   } catch (error) {
     return next(error);
   }
 }
 
-function publishOneExam(req, res, next) {
+async function updateExamQuestions(req, res, next) {
   try {
-    const exam = publishExam(req.params.examId);
+    const operatorUserId = req.user?.sub || null;
+    const exam = await updateExamQuestionsService(
+      req.params.examId,
+      req.body?.questionIds || [],
+      operatorUserId
+    );
+    return ok(res, exam, "更新考试题目成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function publishOneExam(req, res, next) {
+  try {
+    const operatorUserId = req.user?.sub || null;
+    const exam = await publishExamService(req.params.examId, operatorUserId);
     return ok(res, exam, "发布考试成功");
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function deleteExam(req, res, next) {
+  try {
+    const result = await deleteExamService(req.params.examId);
+    return ok(res, result, "删除考试成功");
   } catch (error) {
     return next(error);
   }
@@ -163,7 +191,9 @@ module.exports = {
   activateQuestion,
   listExams,
   createExam,
+  updateExamQuestions,
   publishOneExam,
+  deleteExam,
   listSubmissions,
   listStudents,
   createStudent,
