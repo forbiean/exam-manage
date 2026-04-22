@@ -78,12 +78,40 @@ export default function AdminStudentsPage() {
   });
 
   const [importOpen, setImportOpen] = useState(false);
-  const [importFileName, setImportFileName] = useState("students.csv");
-  const [importCsvText, setImportCsvText] = useState(
-    "username,password,fullName,email,phone,studentNo\nstu1001,Pass@123,张三,zhangsan@example.com,13800000001,S1001"
-  );
+  const [importFileName, setImportFileName] = useState("");
+  const [importCsvText, setImportCsvText] = useState("");
   const [overwriteImport, setOverwriteImport] = useState(false);
   const [importResult, setImportResult] = useState("");
+  const [importParsing, setImportParsing] = useState(false);
+  const [previewRows, setPreviewRows] = useState<Array<Record<string, string>>>([]);
+  const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
+  const [failedRows, setFailedRows] = useState<Array<{ row_no: number; error_message: string | null }>>([]);
+
+  function buildPreview(csvText: string) {
+    const lines = csvText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length < 2) {
+      setPreviewHeaders([]);
+      setPreviewRows([]);
+      return;
+    }
+
+    const headers = lines[0].split(",").map((s) => s.trim());
+    const rows = lines.slice(1, 6).map((line) => {
+      const cols = line.split(",").map((s) => s.trim());
+      const row: Record<string, string> = {};
+      headers.forEach((header, index) => {
+        row[header] = cols[index] || "";
+      });
+      return row;
+    });
+
+    setPreviewHeaders(headers);
+    setPreviewRows(rows);
+  }
 
   async function loadStudents() {
     setLoading(true);
@@ -167,6 +195,11 @@ export default function AdminStudentsPage() {
   }
 
   async function onImport() {
+    if (!importCsvText || !importFileName) {
+      setImportResult("请先选择 .csv 或 .xlsx 文件");
+      return;
+    }
+
     try {
       const data = await importStudentsCsv({
         fileName: importFileName,
@@ -176,9 +209,60 @@ export default function AdminStudentsPage() {
       setImportResult(
         `导入完成：新增 ${data.summary.inserted_count}，更新 ${data.summary.updated_count}，失败 ${data.summary.failed_count}`
       );
+      const failed = (data.detail || [])
+        .filter((item) => !item.imported)
+        .map((item) => ({
+          row_no: item.row_no,
+          error_message: item.error_message,
+        }));
+      setFailedRows(failed);
       await loadStudents();
     } catch (err) {
       setImportResult(err instanceof Error ? err.message : "导入失败");
+      setFailedRows([]);
+    }
+  }
+
+  async function onChooseImportFile(file: File | null) {
+    if (!file) return;
+    setImportResult("");
+    setFailedRows([]);
+    setImportParsing(true);
+    try {
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".csv")) {
+        const text = await file.text();
+        setImportFileName(file.name);
+        setImportCsvText(text);
+        buildPreview(text);
+        return;
+      }
+
+      if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+        const xlsx = await import("xlsx");
+        const buffer = await file.arrayBuffer();
+        const workbook = xlsx.read(buffer, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) {
+          throw new Error("Excel 文件没有可用工作表");
+        }
+        const sheet = workbook.Sheets[firstSheetName];
+        const csv = xlsx.utils.sheet_to_csv(sheet, { FS: ",", RS: "\n" });
+        setImportFileName(file.name);
+        setImportCsvText(csv);
+        buildPreview(csv);
+        return;
+      }
+
+      throw new Error("仅支持 .csv / .xlsx / .xls 文件");
+    } catch (err) {
+      setImportFileName("");
+      setImportCsvText("");
+      setPreviewHeaders([]);
+      setPreviewRows([]);
+      setImportResult(err instanceof Error ? err.message : "文件解析失败");
+    } finally {
+      setImportParsing(false);
     }
   }
 
@@ -202,21 +286,22 @@ export default function AdminStudentsPage() {
                 <DialogHeader>
                   <DialogTitle>批量导入学生</DialogTitle>
                   <DialogDescription>
-                    CSV 表头必须包含：username,password,fullName,studentNo（email/phone 可选）
+                    直接上传 .csv/.xlsx 文件。表头必须包含：username,password,fullName,studentNo（email/phone 可选）
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-3 py-2">
                   <div className="space-y-2">
-                    <Label>文件名</Label>
-                    <Input value={importFileName} onChange={(e) => setImportFileName(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>CSV 内容</Label>
-                    <Textarea
-                      rows={8}
-                      value={importCsvText}
-                      onChange={(e) => setImportCsvText(e.target.value)}
+                    <Label>选择文件</Label>
+                    <Input
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      onChange={(e) => onChooseImportFile(e.target.files?.[0] || null)}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      {importFileName
+                        ? `已选择：${importFileName}${importParsing ? "（解析中...）" : ""}`
+                        : "未选择文件"}
+                    </p>
                   </div>
                   <label className="flex items-center gap-2 text-sm">
                     <input
@@ -227,12 +312,68 @@ export default function AdminStudentsPage() {
                     覆盖已存在账号
                   </label>
                   {importResult ? <p className="text-sm text-muted-foreground">{importResult}</p> : null}
+
+                  {previewRows.length > 0 ? (
+                    <div className="space-y-2">
+                      <Label>数据预览（前 5 行）</Label>
+                      <div className="rounded-md border overflow-auto max-h-52">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-muted/50 border-b">
+                              {previewHeaders.map((header) => (
+                                <th key={header} className="text-left px-2 py-1.5 whitespace-nowrap">
+                                  {header}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {previewRows.map((row, index) => (
+                              <tr key={index} className="border-b last:border-0">
+                                {previewHeaders.map((header) => (
+                                  <td key={`${index}-${header}`} className="px-2 py-1.5 whitespace-nowrap">
+                                    {row[header] || "-"}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {failedRows.length > 0 ? (
+                    <div className="space-y-2">
+                      <Label>失败行明细</Label>
+                      <div className="rounded-md border overflow-auto max-h-52">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-muted/50 border-b">
+                              <th className="text-left px-2 py-1.5">行号</th>
+                              <th className="text-left px-2 py-1.5">错误原因</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {failedRows.map((row) => (
+                              <tr key={row.row_no} className="border-b last:border-0">
+                                <td className="px-2 py-1.5">{row.row_no}</td>
+                                <td className="px-2 py-1.5">{row.error_message || "未知错误"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setImportOpen(false)}>
                     关闭
                   </Button>
-                  <Button onClick={onImport}>执行导入</Button>
+                  <Button onClick={onImport} disabled={importParsing || !importFileName}>
+                    执行导入
+                  </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
