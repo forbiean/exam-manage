@@ -49,6 +49,8 @@ const defaultForm: QuestionForm = {
   analysis: "",
 };
 
+const NEW_CATEGORY_VALUE = "__new_category__";
+
 function getTypeBadge(type: string) {
   switch (type) {
     case "single":
@@ -204,6 +206,15 @@ export default function AdminQuestionsPage() {
     return Array.from(new Set(questions.map((q) => normalizeCategory(q.category)))).sort();
   }, [questions]);
 
+  const createCategorySelectValue =
+    createForm.category.trim() && categories.includes(createForm.category.trim())
+      ? createForm.category.trim()
+      : NEW_CATEGORY_VALUE;
+  const editCategorySelectValue =
+    editForm.category.trim() && categories.includes(editForm.category.trim())
+      ? editForm.category.trim()
+      : NEW_CATEGORY_VALUE;
+
   async function handleCreate() {
     setSavingCreate(true);
     try {
@@ -313,11 +324,35 @@ export default function AdminQuestionsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>分类</Label>
-                    <Input
-                      placeholder="例如：编程基础"
-                      value={createForm.category}
-                      onChange={(e) => setCreateForm({ ...createForm, category: e.target.value })}
-                    />
+                    <Select
+                      value={createCategorySelectValue}
+                      onValueChange={(v) => {
+                        if (v === NEW_CATEGORY_VALUE) {
+                          setCreateForm({ ...createForm, category: "" });
+                          return;
+                        }
+                        setCreateForm({ ...createForm, category: v });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择分类" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories.map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {cat}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value={NEW_CATEGORY_VALUE}>新增分类</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {createCategorySelectValue === NEW_CATEGORY_VALUE ? (
+                      <Input
+                        placeholder="请输入新分类"
+                        value={createForm.category}
+                        onChange={(e) => setCreateForm({ ...createForm, category: e.target.value })}
+                      />
+                    ) : null}
                   </div>
                   <div className="space-y-2">
                     <Label>分值</Label>
@@ -593,7 +628,35 @@ export default function AdminQuestionsPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>分类</Label>
-                <Input value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} />
+                <Select
+                  value={editCategorySelectValue}
+                  onValueChange={(v) => {
+                    if (v === NEW_CATEGORY_VALUE) {
+                      setEditForm({ ...editForm, category: "" });
+                      return;
+                    }
+                    setEditForm({ ...editForm, category: v });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择分类" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((cat) => (
+                      <SelectItem key={cat} value={cat}>
+                        {cat}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={NEW_CATEGORY_VALUE}>新增分类</SelectItem>
+                  </SelectContent>
+                </Select>
+                {editCategorySelectValue === NEW_CATEGORY_VALUE ? (
+                  <Input
+                    placeholder="请输入新分类"
+                    value={editForm.category}
+                    onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                  />
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label>分值</Label>
