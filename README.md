@@ -5,8 +5,6 @@
 - 管理端：题库管理、考试管理、学生管理、提交记录与人工复核
 - 后端：基于 Express + Supabase（PostgreSQL）提供 API
 
-本 README 按 0 基础视角编写，你可以直接照步骤跑起来。
-
 ## 1. 技术栈
 
 - 前端：Next.js 16.2.4（App Router）、React 19、TypeScript、Tailwind CSS v4、shadcn/ui
